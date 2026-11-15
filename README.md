@@ -229,7 +229,6 @@ Python 3.10+ standard library only:
 
 ```powershell
 python skills\lyrics-grammar-sidecar\scripts\selftest.py
-git diff --exit-code -- skills/lyrics-translator
 ```
 
 The suite covers ja/ko/zh/en and Unicode fixtures, Schema v2 and v1 rejection, exact maximal NFC repetition, line-boundary variation, cross-line NFC composition, internal whitespace, short/similar non-matches, metadata exclusion, overlapping and three-occurrence groups, changed tails, canonical phrase/meaning inheritance, explicit overrides, meaning coverage, strict JSON, path/HTML guards, independent audit pass/fail, proof/hash/canonical-byte tamper, and atomic finalization.

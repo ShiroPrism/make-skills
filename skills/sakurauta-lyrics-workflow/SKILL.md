@@ -1,7 +1,7 @@
 ---
 name: sakurauta-lyrics-workflow
-description: Create a bilingual LRC translation and a SakuraUta Schema v2 grammar-analysis sidecar. The parent coordinates three fresh child roles for translation, grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Supports single-file and batch execution modes.
-version: 2.0.0
+description: Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation, grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered.
+version: 2.1.0
 ---
 
 # SakuraUta Lyrics Workflow v2
@@ -202,29 +202,57 @@ Report the final path and validation status.
 
 ## Batch Execution Mode
 
-When translating and generating grammar sidecars for multiple `.lrc` files in a batch, the workflow balances batch execution efficiency with strict Schema v2 cryptographic isolation and semantic accuracy:
+Automatically activate batch execution mode whenever the user requests translating or generating sidecars for an entire directory or folder (e.g., "翻译某个文件夹下的所有文件", "批量翻译", "translate all files in directory"), or when scanning a path reveals multiple `.lrc` files.
 
-1. **Batch Translation (Phase 1)**: Dispatch a single fresh translation child with all target `.lrc` files. The child executes batch operations according to `lyrics-translator` (`lrc_strip.py <all>`, translates pure lyrics per song, `lrc_merge.py <all>`). After user acceptance, batch-project and batch-freeze the translations deterministically:
+### 1. Batch Translation Orchestration (Phase 1)
+
+1. Scan the target directory and collect all candidate `.lrc` files, excluding temporary files and `.grammar-work` directories.
+2. Partition the files into batches of up to 5 files each, maintaining up to 5 concurrent translation subagents (`invoke_subagent`).
+3. Each translation subagent receives the standardized prompt enforcing the three core constraints:
+   - **Mandatory Full Skill Execution**: The subagent must first completely read and strictly follow `lyrics-translator`'s `SKILL.md` and all referenced rules (`reference/common.md` semantic chunking, `source/`, `target/`, and `pair-exceptions.md`). Cutting corners or literal line-by-line direct translation is strictly forbidden.
+   - **Efficient Batching & No-Read Verification Principle (免读验证原则)**:
+     - Run `python <translator-skill>\scripts\lrc_strip.py <file1> <file2>...` to batch-strip timestamps into `.tmp.txt` working files.
+     - Translate pure lyrics in plain text within each `.tmp.txt` file without timestamp distractions.
+     - Run `python <translator-skill>\scripts\lrc_merge.py <file1> <file2>...` to batch-merge and deterministically verify timeline alignment.
+     - **No-Read Verification Principle**: `lrc_merge.py` performs strict deterministic line-count, timestamp, and metadata verification. Output of `[OK]` represents 100% verification success. **Subagents and parent agents are strictly forbidden from calling file-reading tools (`read_file`, etc.) to re-read merged `.lrc` files**, saving massive context tokens.
+   - **Role Isolation & Autonomous Progression**: Subagents focus solely on translating assigned files without inspecting global configs or unrelated files. The parent coordinates the batch fully autonomously without requiring per-file user confirmation.
+4. After all translation subagents finish, execute deterministic batch projection and batch freezing:
 
 ```powershell
 python <grammar-skill>\scripts\project_source.py "<song1.lrc>" "<song2.lrc>" ...
 python <grammar-skill>\scripts\verify_translation.py --batch "<song1.lrc>" "<song2.lrc>" ...
 ```
 
-2. **Per-Song Isolated Analysis and Audit (Phase 2 & 3)**: Deep grammar analysis and semantic auditing cannot be grouped into a single multi-song prompt because Schema v2 isolation proofs (`isolation-grammar-analysis.json`, `isolation-semantic-audit.json`) are cryptographically bound to each song's `sourceProjectionHash` and distinct non-forked `childTranscriptId`. Furthermore, cross-song bundling causes context degradation and span hallucinations. For each song, dispatch a fresh grammar child and a separate fresh semantic-audit child using the standard single-song contracts. Preparation can be run per-song or in batch:
+### 2. Per-Song Isolated Analysis and Audit (Phase 2 & 3)
+
+Deep grammar analysis and semantic auditing cannot be grouped into a single multi-song prompt because Schema v2 isolation proofs (`isolation-grammar-analysis.json`, `isolation-semantic-audit.json`) are cryptographically bound to each song's `sourceProjectionHash` and distinct non-forked `childTranscriptId`. Furthermore, cross-song bundling causes context degradation and span hallucinations.
+
+1. Maintain up to 5 concurrent song pipelines. For each song, dispatch a fresh grammar child and a separate fresh semantic-audit child using the standard single-song contracts.
+2. After grammar children complete drafting and isolation proofs are recorded, run candidate preparation in batch:
 
 ```powershell
 python <grammar-skill>\scripts\prepare.py "<song1.lrc>" "<song2.lrc>" ... --learner-language "<target>"
 ```
 
-3. **Batch Finalize and Verification (Phase 4)**: Once all songs have verified audits and recorded isolation proofs, finalize all sidecars and validate them atomically in batch:
+3. Dispatch independent semantic audit children per song. Each auditor verifies the frozen candidate against original and translated LRCs, writes `semantic-audit.json`, and validates the report. Record the audit isolation proof via `record_isolation.py`.
+
+### 3. Batch Finalize and Verification (Phase 4)
+
+Once all songs have verified audits and recorded isolation proofs, finalize all sidecars and validate them atomically in batch:
 
 ```powershell
 python <grammar-skill>\scripts\finalize.py "<song1.lrc>" "<song2.lrc>" ... --learner-language "<target>"
 python <grammar-skill>\scripts\validate_all.py --batch "<song1.lrc>" "<song2.lrc>" ... --learner-language "<target>"
 ```
 
-Emit an aggregated status table summarizing the batch execution results (Song ID, Translation status, Blocks/Meaning Units count, Audit status, and Final output path).
+**Deterministic No-Read Validation**: Because `finalize.py` and `validate_all.py` enforce 100% cryptographic hash chaining, schema validity, and isolation verification, console output of `[PASS]` / `[OK]` with exit code 0 is authoritative. Do not re-read generated `.json` files into context.
+
+Emit an aggregated status table summarizing the batch execution results:
+
+| Song ID | Source Lines | Translation | Repetition Groups | Semantic Audit | Sidecar Output |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| `<song1>` | `<count>` | `[OK]` | `<groups>` | `pass` | `<song1>.json` |
+| `<song2>` | `<count>` | `[OK]` | `<groups>` | `pass` | `<song2>.json` |
 
 ## Milestone Progress Visibility
 

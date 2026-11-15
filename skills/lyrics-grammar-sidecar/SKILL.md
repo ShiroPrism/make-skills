@@ -1,7 +1,7 @@
 ---
 name: lyrics-grammar-sidecar
-description: Generate, validate, audit, and finalize a SakuraUta Schema v2 lyrics grammar sidecar from a local LRC, frozen bilingual LRC, deterministic repetition candidates, and an independent semantic-audit child.
-version: 2.0.0
+description: Generate, validate, audit, and finalize SakuraUta Schema v2 lyrics grammar sidecars from local LRCs, frozen bilingual LRCs, deterministic repetition candidates, and independent semantic-audit children. Supports single-file and directory-wide batch processing.
+version: 2.1.0
 ---
 
 # Lyrics Grammar Sidecar v2
@@ -263,6 +263,18 @@ python scripts\validate_all.py --batch "<song1.lrc>" "<song2.lrc>" ... --learner
 ```
 
 Verifies the production artifacts and complete audit chains across all songs, returning exit code 0 on complete batch success.
+
+### 2. No-Read Verification Principle (免读验证原则)
+
+All deterministic stage tools (`verify_translation.py`, `prepare.py`, `validate_audit.py`, `finalize.py`, `validate_all.py`) execute mathematically complete validation across schemas, line counts, timestamps, hashes, Unicode spans, and isolation proofs:
+
+- When a tool exits with code 0 and prints `[OK]` or `[PASS]`, the output artifact is 100% verified.
+- **Agents must not invoke file-reading tools (`read_file`, etc.) to re-read or inspect generated `.lrc` or `.json` files**, conserving massive context tokens and execution latency.
+
+### 3. Concurrency and Cryptographic Isolation
+
+- **Concurrency**: Orchestrators may run up to 5 concurrent song pipelines in parallel.
+- **Strict Per-Song Isolation**: Every song must retain its own fresh non-forked grammar child and a separate fresh non-forked audit child. Schema v2 cryptographic isolation proofs (`sourceProjectionHash`, `candidateHash`, `childTranscriptId`) are strictly song-bound and cannot be combined across songs.
 
 ## Validation Boundary
 
