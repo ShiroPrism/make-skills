@@ -1,7 +1,7 @@
 ---
 name: lyrics-grammar-sidecar
 description: Generate, validate, audit, and finalize SakuraUta Schema v2 lyrics grammar sidecars from local LRCs, frozen bilingual LRCs, deterministic repetition candidates, and independent semantic-audit children. Supports single-file and directory-wide batch processing.
-version: 2.2.0
+version: 2.2.1
 ---
 
 # Lyrics Grammar Sidecar v2
@@ -224,6 +224,8 @@ python scripts\status.py "<target-dir>"
 
 Inspects all `.lrc` files in the target directory, checks presence and validity of projections, translations, drafts, isolation proofs, candidates, audits, and final JSON sidecars, and displays a formatted progress table showing the next required action per song.
 
+Completed rows report `Complete (Valid)` only after the final sidecar passes deterministic validation; otherwise the action is `Review: <error-code>`.
+
 - **Batch Source Projection**:
 
 ```powershell
@@ -286,11 +288,13 @@ Deterministic validation owns:
 - Unicode code-point spans and contiguous occurrence mapping;
 - exact NFC repetition discovery and candidate completion;
 - canonical occurrence inheritance and explicit override structure;
-- composed meaning coverage;
+- composed meaning coverage and boundary punctuation;
 - references, multi-block scopes, learner language, HTML/path guards;
 - candidate/audit/proof hash chain and atomic writes.
 
 It does not decide whether prose is faithful. That is the independent audit child's responsibility. The generation child must never self-approve its own semantic audit.
+
+Sidecars that fail with `duplicate_boundary_punctuation` must be revised in a fresh grammar child and re-audited; do not patch `analysis-candidate.json` or the production JSON.
 
 ## Self-Test
 
@@ -300,4 +304,4 @@ Run from any current directory:
 python scripts\selftest.py
 ```
 
-The standard-library-only suite generates every prepare -> audit -> finalize chain in a temporary workdir. Its only committed repetition case is the compact `fixtures/repetition` input set (source LRC, accepted translation, semantic draft, and final sidecar golden), so candidate, audit, isolation-proof, and validation-report copies are not duplicated in the repository. Coverage includes exact maximal and changed-tail repetition, three occurrences, overlap, line-break variation, cross-line NFC composition, internal whitespace, fuzzy non-matches, metadata exclusion, missing/wrong shared occurrences, blank overrides, meaning coverage, strict JSON, path and HTML guards, audit pass/fail, proof/hash/canonical-byte tamper, v1 rejection, and atomic finalization.
+The standard-library-only suite generates every prepare -> audit -> finalize chain in a temporary workdir. Its only committed repetition case is the compact `fixtures/repetition` input set (source LRC, accepted translation, semantic draft, and final sidecar golden), so candidate, audit, isolation-proof, and validation-report copies are not duplicated in the repository. Coverage includes exact maximal and changed-tail repetition, three occurrences, overlap, line-break variation, cross-line NFC composition, internal whitespace, fuzzy non-matches, metadata exclusion, missing/wrong shared occurrences, blank overrides, meaning coverage, boundary punctuation, strict JSON, path and HTML guards, audit pass/fail, proof/hash/canonical-byte tamper, v1 rejection, and atomic finalization.

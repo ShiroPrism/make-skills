@@ -67,6 +67,8 @@ AUDIT_FINDING_CODES = {
     "other",
 }
 
+PART_BOUNDARY_PUNCTUATION = frozenset("，,；;、。！？!?")
+
 
 @dataclass(frozen=True)
 class NormalizedLine:
@@ -1524,13 +1526,24 @@ def _validate_block_meanings(
     issues: list[Issue],
 ) -> None:
     occurrence_to_unit: dict[str, str] = {}
+    occurrence_text: dict[str, str] = {}
     for unit_id, unit in meaning_units.items():
         occurrences = unit.get("occurrences")
         if not isinstance(occurrences, list):
             continue
+        unit_text = unit.get("text")
         for occurrence in occurrences:
-            if isinstance(occurrence, dict) and isinstance(occurrence.get("occurrenceId"), str):
-                occurrence_to_unit[occurrence["occurrenceId"]] = unit_id
+            if not isinstance(occurrence, dict):
+                continue
+            occurrence_id = occurrence.get("occurrenceId")
+            if not isinstance(occurrence_id, str):
+                continue
+            occurrence_to_unit[occurrence_id] = unit_id
+            override = occurrence.get("semanticOverride")
+            if isinstance(override, dict) and isinstance(override.get("text"), str):
+                occurrence_text[occurrence_id] = override["text"]
+            elif isinstance(unit_text, str):
+                occurrence_text[occurrence_id] = unit_text
 
     for block_index, block in enumerate(blocks_list):
         block_id = block.get("blockId")
@@ -1548,9 +1561,11 @@ def _validate_block_meanings(
             )
             continue
         resolved: list[tuple[int, int, str]] = []
+        previous_effective_text: str | None = None
         for part_index, part in enumerate(parts):
             part_path = f"{path}[{part_index}]"
             if not isinstance(part, dict):
+                previous_effective_text = None
                 continue
             occurrence_id = part.get("meaningUnitOccurrenceId")
             if not isinstance(occurrence_id, str):
@@ -1561,6 +1576,7 @@ def _validate_block_meanings(
                         "Missing meaning-unit occurrence reference.",
                     )
                 )
+                previous_effective_text = None
                 continue
             occurrence_range = meaning_ranges.get(occurrence_id)
             if occurrence_range is None:
@@ -1571,6 +1587,7 @@ def _validate_block_meanings(
                         f"Unknown meaning-unit occurrence: {occurrence_id}",
                     )
                 )
+                previous_effective_text = None
                 continue
             if occurrence_range.block_id != block_id:
                 issues.append(
@@ -1580,6 +1597,7 @@ def _validate_block_meanings(
                         "Meaning-unit occurrence belongs to a different block.",
                     )
                 )
+                previous_effective_text = None
                 continue
             if occurrence_id not in occurrence_to_unit:
                 issues.append(
@@ -1589,7 +1607,32 @@ def _validate_block_meanings(
                         "Occurrence has no canonical meaning unit.",
                     )
                 )
+                previous_effective_text = None
                 continue
+            text_before = part.get("textBefore")
+            current_text = occurrence_text.get(occurrence_id, "")
+            current_effective_text = (
+                text_before if isinstance(text_before, str) else ""
+            ) + current_text
+            if (
+                previous_effective_text is not None
+                and _boundary_punctuation_duplicated(
+                    previous_effective_text, current_effective_text
+                )
+            ):
+                issue_path = (
+                    part_path + ".textBefore"
+                    if isinstance(text_before, str) and text_before.strip()
+                    else part_path
+                )
+                issues.append(
+                    Issue(
+                        "duplicate_boundary_punctuation",
+                        issue_path,
+                        "Adjacent meaning parts must not repeat punctuation at their boundary.",
+                    )
+                )
+            previous_effective_text = current_effective_text
             resolved.append(
                 (occurrence_range.start, occurrence_range.end, occurrence_id)
             )
@@ -1618,6 +1661,17 @@ def _validate_block_meanings(
                     "Block meaning does not cover: " + ", ".join(missing_lines),
                 )
             )
+
+
+def _boundary_punctuation_duplicated(previous_text: str, next_text: str) -> bool:
+    left = previous_text.rstrip()
+    right = next_text.lstrip()
+    return bool(
+        left
+        and right
+        and left[-1] in PART_BOUNDARY_PUNCTUATION
+        and right[0] in PART_BOUNDARY_PUNCTUATION
+    )
 
 
 def _validate_relations(

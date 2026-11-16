@@ -8,7 +8,44 @@ import json
 import sys
 from pathlib import Path
 
-from sidecarlib import configure_utf8_stdio
+from sidecarlib import (
+    SidecarError,
+    configure_utf8_stdio,
+    load_projection,
+    read_json,
+    verify_source_matches_projection,
+)
+from v2lib import validate_grammar_analysis_v2
+
+
+def validate_final_sidecar(
+    lrc_file: Path,
+    json_file: Path,
+    projection_path: Path,
+) -> tuple[bool, str | None]:
+    try:
+        projection = load_projection(projection_path)
+        _, source_issues = verify_source_matches_projection(projection, lrc_file)
+        if source_issues:
+            return False, source_issues[0].code
+        document = read_json(json_file)
+        learner_language = None
+        extensions = document.get("extensions")
+        if isinstance(extensions, dict) and isinstance(
+            extensions.get("learnerLanguage"), str
+        ):
+            learner_language = extensions["learnerLanguage"]
+        issues = validate_grammar_analysis_v2(
+            document,
+            projection=projection,
+            expected_lrc_file=projection.get("lrcFile"),
+            require_projection=True,
+            learner_language=learner_language,
+        )
+    except (SidecarError, OSError, ValueError) as exc:
+        code = getattr(exc, "code", "validation_error")
+        return False, code
+    return (not issues, issues[0].code if issues else None)
 
 
 def inspect_song(lrc_file: Path) -> dict:
@@ -27,6 +64,8 @@ def inspect_song(lrc_file: Path) -> dict:
     has_a_iso = (workdir / "isolation-semantic-audit.json").is_file() if has_workdir else False
     has_json = json_file.is_file()
 
+    final_valid: bool | None = None
+    validation_code: str | None = None
     if not has_proj:
         next_action = "Phase 1: project_source.py"
     elif not has_trans:
@@ -44,7 +83,16 @@ def inspect_song(lrc_file: Path) -> dict:
     elif not has_json:
         next_action = "Phase 4: finalize.py"
     else:
-        next_action = "Complete (Valid)"
+        final_valid, validation_code = validate_final_sidecar(
+            lrc_file,
+            json_file,
+            workdir / "source-projection.json",
+        )
+        next_action = (
+            "Complete (Valid)"
+            if final_valid
+            else f"Review: {validation_code or 'validation_error'}"
+        )
 
     return {
         "song": stem,
@@ -57,6 +105,8 @@ def inspect_song(lrc_file: Path) -> dict:
         "audit": has_audit,
         "a_iso": has_a_iso,
         "final": has_json,
+        "finalValid": final_valid,
+        "validationCode": validation_code,
         "nextAction": next_action,
     }
 

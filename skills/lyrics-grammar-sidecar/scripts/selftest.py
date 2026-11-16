@@ -1144,6 +1144,65 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         )
         self.assert_issue(issues, "schema_additional_property")
 
+    def test_meaning_parts_reject_duplicate_boundary_punctuation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            lrc = Path(temp) / "boundary-punctuation.lrc"
+            lrc.write_text(
+                "[00:01.00]最初の行\n"
+                "[00:02.00]次の行\n",
+                encoding="utf-8",
+            )
+            projection = source_projection_from_lrc(
+                lrc, "Fixture - Boundary Punctuation"
+            )
+            document = simple_document(
+                projection,
+                source_language="ja",
+                learner_language="zh-CN",
+                meaning_text="第一句。",
+                explanation="边界标点回归。",
+                gloss="第一句",
+            )
+            first_line, second_line = projection["lines"]
+            document["meaningUnits"] = [
+                meaning_unit(
+                    "mu_first",
+                    "第一句。",
+                    [
+                        meaning_occurrence(
+                            "muo_first", "b_fixture", [segment(first_line)]
+                        )
+                    ],
+                ),
+                meaning_unit(
+                    "mu_second",
+                    "第二句。",
+                    [
+                        meaning_occurrence(
+                            "muo_second", "b_fixture", [segment(second_line)]
+                        )
+                    ],
+                ),
+            ]
+            document["blocks"][0]["meaning"]["parts"] = [
+                {"meaningUnitOccurrenceId": "muo_first"},
+                {
+                    "meaningUnitOccurrenceId": "muo_second",
+                    "textBefore": "，",
+                },
+            ]
+            issues = validate_grammar_analysis_v2(
+                document,
+                projection,
+                projection["lrcFile"],
+                require_projection=True,
+                learner_language="zh-CN",
+            )
+            self.assert_issue(issues, "duplicate_boundary_punctuation")
+
+            document["meaningUnits"][0]["text"] = "第一句"
+            self.assert_valid(document, projection, "zh-CN")
+
     def test_missing_shared_meaning_unit_occurrence_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             lrc = Path(temp) / "unit-shared.lrc"

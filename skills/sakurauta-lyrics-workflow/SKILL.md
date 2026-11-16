@@ -1,7 +1,7 @@
 ---
 name: sakurauta-lyrics-workflow
 description: Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation, grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered.
-version: 2.2.0
+version: 2.2.1
 ---
 
 # SakuraUta Lyrics Workflow v2
@@ -110,7 +110,7 @@ python <grammar-skill>\scripts\prepare.py "<song.lrc>" `
   --learner-language "<target>"
 ```
 
-This validates projection/freeze identity, Schema v2, exact repetition completion, canonical source normalization, meaning coverage, and shared occurrence mappings. It writes:
+This validates projection/freeze identity, Schema v2, exact repetition completion, canonical source normalization, meaning coverage, boundary punctuation, and shared occurrence mappings. It writes:
 
 - `analysis-candidate.json`;
 - `analysis-candidate.sha256`;

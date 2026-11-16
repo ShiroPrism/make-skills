@@ -169,6 +169,8 @@ Effective text is the concatenation of `textBefore + effectiveMeaningText` for e
 
 `textBefore` is learner-facing connective text, limited to 120 characters. Every changed tail or otherwise uncovered line requires its own meaning-unit occurrence.
 
+Punctuation belongs to exactly one side of a part boundary. If the preceding effective text already ends with a sentence or clause mark, do not start `textBefore` with another punctuation mark. Omit `textBefore` when the previous part already ends with `。` / `？` / `！` / `，` / `；` / `、`; use punctuation-bearing `textBefore` only when the previous part ends without punctuation. Invalid boundaries include `。，`, `。；`, `？，`, `。。`, and `，，`.
+
 ## Meaning Units
 
 A meaning unit owns the canonical learner-facing synthesis shared by all of its occurrences:
