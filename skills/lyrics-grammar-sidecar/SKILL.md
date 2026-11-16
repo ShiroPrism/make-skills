@@ -1,7 +1,7 @@
 ---
 name: lyrics-grammar-sidecar
 description: Generate, validate, audit, and finalize SakuraUta Schema v2 lyrics grammar sidecars from local LRCs, frozen bilingual LRCs, deterministic repetition candidates, and independent semantic-audit children. Supports single-file and directory-wide batch processing.
-version: 2.1.0
+version: 2.2.0
 ---
 
 # Lyrics Grammar Sidecar v2
@@ -105,18 +105,14 @@ python scripts\resolve_spans.py `
 After the child returns and the draft is final, the parent records the actual grammar-child identity:
 
 ```powershell
-python scripts\record_isolation.py `
-  "<workdir>\source-projection.json" `
+python scripts\record_isolation.py "<workdir>" `
   --stage grammar-analysis `
-  --artifact "<workdir>\semantic-draft.json" `
-  --method native-subagent `
   --child-transcript-id "<actual-grammar-child-id>" `
   --parent-transcript-id "<actual-parent-id>" `
-  --output "<workdir>\isolation-grammar-analysis.json" `
   --replace
 ```
 
-Never invent transcript IDs. Inline or forked execution is rejected.
+Positional argument accepts `<workdir>`, `<song.lrc>`, or `<projection.json>`. Artifact, output, and method (`native-subagent`) are automatically inferred when pointing to a workdir or LRC file. Explicit paths remain supported. Never invent transcript IDs. Inline or forked execution is rejected.
 
 ## 4. Freeze the Analysis Candidate
 
@@ -167,14 +163,10 @@ python scripts\validate_audit.py `
 After validation, the parent records the audit-child proof:
 
 ```powershell
-python scripts\record_isolation.py `
-  "<workdir>\source-projection.json" `
+python scripts\record_isolation.py "<workdir>" `
   --stage semantic-audit `
-  --artifact "<workdir>\semantic-audit.json" `
-  --method native-subagent `
   --child-transcript-id "<actual-audit-child-id>" `
   --parent-transcript-id "<actual-parent-id>" `
-  --output "<workdir>\isolation-semantic-audit.json" `
   --replace
 ```
 
@@ -223,6 +215,14 @@ python scripts\validate_all.py `
 ## Batch Operations
 
 The deterministic CLI tools natively support batch execution across multiple songs:
+
+- **Batch Progress Inspection**:
+
+```powershell
+python scripts\status.py "<target-dir>"
+```
+
+Inspects all `.lrc` files in the target directory, checks presence and validity of projections, translations, drafts, isolation proofs, candidates, audits, and final JSON sidecars, and displays a formatted progress table showing the next required action per song.
 
 - **Batch Source Projection**:
 

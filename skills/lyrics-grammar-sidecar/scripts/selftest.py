@@ -2572,6 +2572,98 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             self.assertIn("[PASS] song_a.lrc -> song_a.json", proc.stdout)
             self.assertIn("[PASS] song_b.lrc -> song_b.json", proc.stdout)
 
+    def test_record_isolation_shorthand_resolution(self) -> None:
+        """Test record_isolation.py shorthand path resolution and defaults."""
+        scripts = SKILL_ROOT / "scripts"
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            lrc_file = base / "test_shorthand.lrc"
+            lrc_file.write_text("[00:01.00]こんにちは\n", encoding="utf-8")
+            work = base / "test_shorthand.grammar-work"
+            work.mkdir()
+
+            self.run_cli(
+                str(scripts / "project_source.py"),
+                str(lrc_file),
+                "--song-id",
+                "test-shorthand",
+            )
+            draft_path = work / "semantic-draft.json"
+            write_json_atomic(draft_path, {
+                "schema": "sakurauta.lyrics-grammar-analysis",
+                "schemaVersion": SCHEMA_VERSION,
+                "source": {
+                    "lrcFile": "test_shorthand.lrc",
+                    "sourceHash": "sha256:" + "0" * 64,
+                    "lineCount": 1
+                },
+                "extensions": {"learnerLanguage": "zh-CN"},
+                "blocks": [],
+                "meaningUnits": [],
+                "repetitionGroups": []
+            })
+
+            audit_path = work / "semantic-audit.json"
+            write_json_atomic(audit_path, {
+                "schema": SEMANTIC_AUDIT_SCHEMA_ID,
+                "auditVersion": AUDIT_VERSION,
+                "candidateSha256": "sha256:" + "0" * 64,
+                "learnerLanguage": "zh-CN",
+                "status": "pass",
+                "reviewedBlockIds": [],
+                "reviewedMeaningUnitIds": [],
+                "findings": []
+            })
+
+            # 1. Positional workdir shorthand
+            self.run_cli(
+                str(scripts / "record_isolation.py"),
+                str(work),
+                "--stage",
+                "grammar-analysis",
+                "--child-transcript-id",
+                "shorthand-child-grammar",
+                "--parent-transcript-id",
+                "shorthand-parent",
+                "--replace",
+            )
+            proof_g = read_json(work / "isolation-grammar-analysis.json")
+            self.assertEqual(proof_g["stage"], "grammar-analysis")
+            self.assertEqual(proof_g["childTranscriptId"], "shorthand-child-grammar")
+            self.assertEqual(proof_g["method"], "native-subagent")
+
+            # 2. Positional LRC shorthand
+            self.run_cli(
+                str(scripts / "record_isolation.py"),
+                str(lrc_file),
+                "--stage",
+                "semantic-audit",
+                "--child-transcript-id",
+                "shorthand-child-audit",
+                "--parent-transcript-id",
+                "shorthand-parent",
+                "--replace",
+            )
+            proof_a = read_json(work / "isolation-semantic-audit.json")
+            self.assertEqual(proof_a["stage"], "semantic-audit")
+            self.assertEqual(proof_a["childTranscriptId"], "shorthand-child-audit")
+            self.assertEqual(proof_a["method"], "native-subagent")
+
+            # 3. Flag --workdir shorthand without parent ID
+            self.run_cli(
+                str(scripts / "record_isolation.py"),
+                "--workdir",
+                str(work),
+                "--stage",
+                "grammar-analysis",
+                "--child-transcript-id",
+                "shorthand-child-no-parent",
+                "--replace",
+            )
+            proof_np = read_json(work / "isolation-grammar-analysis.json")
+            self.assertEqual(proof_np["childTranscriptId"], "shorthand-child-no-parent")
+            self.assertIsNone(proof_np["parentTranscriptId"])
+
 
 if __name__ == "__main__":
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"

@@ -1,7 +1,7 @@
 ---
 name: sakurauta-lyrics-workflow
 description: Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation, grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered.
-version: 2.1.0
+version: 2.2.0
 ---
 
 # SakuraUta Lyrics Workflow v2
@@ -21,6 +21,8 @@ Only the deterministic finalizer writes `<song>.json`.
 - SakuraUta `songId` (default: LRC basename without `.lrc`).
 
 Work directory: `<song>.grammar-work` beside the source.
+
+Quote all file paths in PowerShell commands (especially when titles contain special characters like semicolons `;`, ampersands `&`, dollars `$`, or apostrophes `'`).
 
 Reject video, subtitle, remote, non-LRC, network-share, and symlinked inputs.
 
@@ -78,29 +80,26 @@ Read and follow <grammar-skill>\SKILL.md and
 Read only the original LRC, source projection, and frozen translated.lrc.
 Write only <workdir>\semantic-draft.json.
 Use learner language <target>.
+Inspect lines via Python; do not dump the full LRC into console output.
 You can run scripts\validate.py at any time during drafting to check your draft.
 Run discover_repetitions.py with --in-place after blocks are complete:
   python scripts\discover_repetitions.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --workdir "<workdir>" --learner-language "<target>" --replace --in-place
 You can also run scripts\resolve_spans.py to automatically verify or fix Unicode code-point spans:
   python scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --in-place
-Do not write <song>.json and do not alter the frozen translation.
+Do not write <song>.json, do not write isolation proofs, and do not alter the frozen translation.
 ```
 
 5. After the grammar child returns, record the actual grammar-child identity:
 
 ```powershell
-python <grammar-skill>\scripts\record_isolation.py `
-  "<workdir>\source-projection.json" `
+python <grammar-skill>\scripts\record_isolation.py "<workdir>" `
   --stage grammar-analysis `
-  --artifact "<workdir>\semantic-draft.json" `
-  --method native-subagent `
   --child-transcript-id "<actual-grammar-child-id>" `
   --parent-transcript-id "<actual-parent-id>" `
-  --output "<workdir>\isolation-grammar-analysis.json" `
   --replace
 ```
 
-Never invent an ID.
+Never invent an ID. Explicit file paths remain supported.
 
 6. Deterministically freeze the candidate:
 
@@ -130,6 +129,8 @@ Audit <workdir>\analysis-candidate.json against the original LRC, frozen
 translated.lrc, and candidate SHA-256. The semantic draft is read-only
 supporting context; the candidate is the reviewed artifact.
 Write only <workdir>\semantic-audit.json.
+Do not write isolation-semantic-audit.json (the parent records isolation proofs).
+Inspect lines via Python; do not dump the full LRC into console output.
 Self-verify with scripts\validate_audit.py before returning.
 Do not edit the draft, candidate, hash, translation, or <song>.json.
 Do not inspect Python internals or search for schema files outside schema/v2/.
@@ -151,18 +152,14 @@ python <grammar-skill>\scripts\validate_audit.py `
 9. After validating the report, record the actual audit-child identity:
 
 ```powershell
-python <grammar-skill>\scripts\record_isolation.py `
-  "<workdir>\source-projection.json" `
+python <grammar-skill>\scripts\record_isolation.py "<workdir>" `
   --stage semantic-audit `
-  --artifact "<workdir>\semantic-audit.json" `
-  --method native-subagent `
   --child-transcript-id "<actual-audit-child-id>" `
   --parent-transcript-id "<actual-parent-id>" `
-  --output "<workdir>\isolation-semantic-audit.json" `
   --replace
 ```
 
-This ID must differ from `<actual-grammar-child-id>`. A same-child audit is always rejected.
+This ID must differ from `<actual-grammar-child-id>`. A same-child audit is always rejected. Explicit file paths remain supported.
 
 If the audit fails, do not finalize. Rerun analysis and audit in fresh transcripts after resolving the finding, or ask the user to resolve the semantic dispute.
 
@@ -227,14 +224,15 @@ python <grammar-skill>\scripts\verify_translation.py --batch "<song1.lrc>" "<son
 
 Deep grammar analysis and semantic auditing cannot be grouped into a single multi-song prompt because Schema v2 isolation proofs (`isolation-grammar-analysis.json`, `isolation-semantic-audit.json`) are cryptographically bound to each song's `sourceProjectionHash` and distinct non-forked `childTranscriptId`. Furthermore, cross-song bundling causes context degradation and span hallucinations.
 
-1. Maintain up to 5 concurrent song pipelines. For each song, dispatch a fresh grammar child and a separate fresh semantic-audit child using the standard single-song contracts.
-2. After grammar children complete drafting and isolation proofs are recorded, run candidate preparation in batch:
+1. **Concurrency Sliding Window (Worker Pool)**: Maintain a pool of up to 3–4 concurrent song pipelines (dispatch a new child as soon as a previous one finishes). Do not launch unbounded concurrent children (e.g., 8+ at once) to avoid triggering API rate limits or `RESOURCE_EXHAUSTED (code 429)`. For each song, dispatch a fresh grammar child and a separate fresh semantic-audit child using the standard single-song contracts.
+2. **Batch Progress Inspection**: Run `python <grammar-skill>\scripts\status.py "<target-dir>"` at any time to inspect batch progress across all phases or resume seamlessly after interruption.
+3. After grammar children complete drafting and isolation proofs are recorded, run candidate preparation in batch:
 
 ```powershell
 python <grammar-skill>\scripts\prepare.py "<song1.lrc>" "<song2.lrc>" ... --learner-language "<target>"
 ```
 
-3. Dispatch independent semantic audit children per song. Each auditor verifies the frozen candidate against original and translated LRCs, writes `semantic-audit.json`, and validates the report. Record the audit isolation proof via `record_isolation.py`.
+4. Dispatch independent semantic audit children per song. Each auditor verifies the frozen candidate against original and translated LRCs, writes `semantic-audit.json`, and validates the report. Record the audit isolation proof via `record_isolation.py`.
 
 ### 3. Batch Finalize and Verification (Phase 4)
 

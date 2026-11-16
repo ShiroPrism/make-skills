@@ -25,7 +25,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Record the separate-transcript proof required for a v2 stage."
     )
-    parser.add_argument("projection", type=Path, help="source-projection.json")
+    parser.add_argument(
+        "target",
+        type=Path,
+        nargs="?",
+        default=None,
+        help="source-projection.json, workdir, or LRC file",
+    )
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        help="<song>.grammar-work directory",
+    )
     parser.add_argument(
         "--stage",
         required=True,
@@ -35,14 +46,13 @@ def main() -> int:
     parser.add_argument(
         "--artifact",
         type=Path,
-        required=True,
         help="Artifact produced by the child (draft for grammar, audit report for audit)",
     )
     parser.add_argument(
         "--method",
-        required=True,
         choices=sorted(ISOLATION_METHODS),
-        help="Harness that supplies a separate transcript",
+        default="native-subagent",
+        help="Harness that supplies a separate transcript (default: native-subagent)",
     )
     parser.add_argument(
         "--child-transcript-id",
@@ -56,16 +66,63 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        required=True,
         help="Destination isolation proof JSON",
     )
     parser.add_argument("--replace", action="store_true")
     args = parser.parse_args()
 
     try:
-        projection_path = args.projection.expanduser()
-        artifact_path = args.artifact.expanduser()
-        output_path = args.output.expanduser()
+        target = args.target.expanduser().resolve() if args.target is not None else None
+        workdir = args.workdir.expanduser().resolve() if args.workdir is not None else None
+
+        projection_path: Path | None = None
+        if target is not None:
+            if target.is_dir() or target.name.endswith(".grammar-work"):
+                workdir = workdir or target
+                projection_path = workdir / "source-projection.json"
+            elif target.suffix.lower() == ".lrc":
+                workdir = workdir or (target.parent / f"{target.stem}.grammar-work").resolve()
+                projection_path = workdir / "source-projection.json"
+            elif target.name == "source-projection.json" or target.suffix.lower() == ".json":
+                projection_path = target
+                workdir = workdir or target.parent
+            else:
+                if target.is_file():
+                    projection_path = target
+                    workdir = workdir or target.parent
+                else:
+                    workdir = workdir or target
+                    projection_path = workdir / "source-projection.json"
+        elif workdir is not None:
+            projection_path = workdir / "source-projection.json"
+        else:
+            raise SidecarError("missing-target", "Either a target path or --workdir must be provided.")
+
+        if projection_path is None:
+            projection_path = (workdir / "source-projection.json") if workdir else Path("source-projection.json")
+
+        artifact_path = args.artifact.expanduser().resolve() if args.artifact is not None else None
+        if artifact_path is None:
+            if workdir is None:
+                raise SidecarError("missing-artifact", "--artifact is required when workdir cannot be inferred.")
+            if args.stage == "grammar-analysis":
+                artifact_path = workdir / "semantic-draft.json"
+            elif args.stage == "semantic-audit":
+                artifact_path = workdir / "semantic-audit.json"
+            else:
+                raise SidecarError("missing-artifact", f"Unknown stage {args.stage}.")
+
+        output_path = args.output.expanduser().resolve() if args.output is not None else None
+        if output_path is None:
+            if workdir is None:
+                raise SidecarError("missing-output", "--output is required when workdir cannot be inferred.")
+            if args.stage == "grammar-analysis":
+                output_path = workdir / "isolation-grammar-analysis.json"
+            elif args.stage == "semantic-audit":
+                output_path = workdir / "isolation-semantic-audit.json"
+            else:
+                raise SidecarError("missing-output", f"Unknown stage {args.stage}.")
+
         assert_distinct_paths(
             ("source projection", projection_path),
             ("child artifact", artifact_path),
