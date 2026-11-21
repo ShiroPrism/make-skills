@@ -2723,6 +2723,100 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             self.assertEqual(proof_np["childTranscriptId"], "shorthand-child-no-parent")
             self.assertIsNone(proof_np["parentTranscriptId"])
 
+    def test_scaffold_draft_and_audit_summary_cli(self) -> None:
+        scripts = SKILL_ROOT / "scripts"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            source = base / "cli-source.lrc"
+            source.write_bytes((FIXTURES / "ja" / "source.lrc").read_bytes())
+            accepted = base / "accepted.lrc"
+            accepted.write_bytes((FIXTURES / "ja" / "translated.lrc").read_bytes())
+            work = base / "cli-source.grammar-work"
+            projection_path = work / "source-projection.json"
+
+            # 1. Project source and verify translation
+            self.run_cli(
+                str(scripts / "project_source.py"),
+                str(source),
+                "--song-id",
+                "Fixture - Japanese Promise",
+            )
+            self.run_cli(
+                str(scripts / "verify_translation.py"),
+                str(projection_path),
+                str(accepted),
+                "--workdir",
+                str(work),
+            )
+
+            # 2. Scaffold draft CLI
+            self.run_cli(
+                str(scripts / "scaffold_draft.py"),
+                str(work),
+                "--learner-language",
+                "zh-CN",
+            )
+            draft = read_json(work / "semantic-draft.json")
+            self.assertEqual(draft["schemaVersion"], 2)
+            self.assertGreater(len(draft["lines"]), 0)
+            self.assertGreater(len(draft["blocks"]), 0)
+            self.assertGreater(len(draft["meaningUnits"]), 0)
+
+            # 3. Freeze candidate with prepare.py
+            self.run_cli(
+                str(scripts / "record_isolation.py"),
+                str(projection_path),
+                "--stage",
+                "grammar-analysis",
+                "--artifact",
+                str(work / "semantic-draft.json"),
+                "--method",
+                "native-subagent",
+                "--child-transcript-id",
+                "cli-child-grammar",
+                "--parent-transcript-id",
+                "cli-parent",
+                "--output",
+                str(work / "isolation-grammar-analysis.json"),
+                "--replace",
+            )
+            self.run_cli(
+                str(scripts / "prepare.py"),
+                str(source),
+                "--projection",
+                str(projection_path),
+                "--workdir",
+                str(work),
+                "--learner-language",
+                "zh-CN",
+            )
+
+            # 4. Audit summary CLI with --emit-template
+            res = self.run_cli(
+                str(scripts / "audit_summary.py"),
+                str(work),
+                "--emit-template",
+                str(work / "semantic-audit.json"),
+                "--replace",
+            )
+            self.assertIn("SEMANTIC AUDIT SUMMARY", res.stdout)
+            audit = read_json(work / "semantic-audit.json")
+            self.assertEqual(audit["status"], "pass")
+            self.assertEqual(len(audit["reviewedBlockIds"]), len(draft["blocks"]))
+            self.assertEqual(len(audit["reviewedMeaningUnitIds"]), len(draft["meaningUnits"]))
+
+            # 5. Validate emitted audit template
+            self.run_cli(
+                str(scripts / "validate_audit.py"),
+                str(work / "analysis-candidate.json"),
+                "--candidate-hash",
+                str(work / "analysis-candidate.sha256"),
+                str(work / "semantic-audit.json"),
+                "--learner-language",
+                "zh-CN",
+            )
+
+
 
 if __name__ == "__main__":
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"

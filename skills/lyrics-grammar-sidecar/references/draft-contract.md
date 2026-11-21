@@ -7,17 +7,23 @@ The draft must be based on the original LRC and the accepted, frozen `translated
 ## Pipeline Boundary
 
 ```text
-semantic-draft.json
-  -> discover_repetitions.py
-  -> copy every `repetitionId` + `occurrences` candidate into the draft
+semantic-draft.json (scaffold_draft.py -> enrich phrases/notes -> resolve_spans.py)
   -> prepare.py
   -> analysis-candidate.json + analysis-candidate.sha256
-  -> independent semantic-audit child
+  -> independent semantic-audit child (audit_summary.py)
   -> semantic-audit.json
   -> grammar/audit isolation proofs
   -> finalize.py
   -> sibling <song>.json
 ```
+
+The grammar child must follow the 3-step single-pass authoring workflow:
+
+1. **Scaffold**: Run `python scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions` to generate a 100% Schema v2 compliant initial draft with lines, blocks, synthesized meanings, and repetition groups pre-filled.
+2. **Enrich**: Add educational `phrases` and `grammarNotes` with clear learner-facing explanations and translations.
+3. **Resolve Spans & Validate**: Run `python scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --in-place` followed by `python scripts\validate.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --learner-language "<target>"`.
+
+Agents must not inspect or read internal library scripts (`v2lib.py`, `sidecarlib.py`, etc.), dump full files into context, or author structural lines/blocks manually.
 
 The grammar child may not invent, merge, shorten, lengthen, or omit a repetition candidate. If the draft fails preparation, revise the semantic draft in a fresh grammar child; do not edit the frozen translation.
 

@@ -68,38 +68,45 @@ Give the grammar child:
 - requested learner language;
 - [references/draft-contract.md](references/draft-contract.md).
 
-The child records the target language:
+The grammar child authors only `semantic-draft.json` following this fast, token-efficient 3-step workflow:
 
-```json
-{
-  "extensions": {
-    "learnerLanguage": "zh-CN"
-  }
-}
-```
+### Step 3.1: Scaffolding the Baseline Draft
 
-It writes only `semantic-draft.json`. All learner-facing prose uses that language. Stable identifiers may remain English.
-
-After lines and blocks exist, discover exact repetitions:
+Run `scripts\scaffold_draft.py` to automatically scaffold a Schema v2 compliant initial draft with lines, monotonic blocks, pre-synthesized meanings from `translated.lrc`, and exact repetition groups:
 
 ```powershell
-python scripts\discover_repetitions.py `
-  "<workdir>\semantic-draft.json" `
-  --projection "<workdir>\source-projection.json" `
-  --workdir "<workdir>" `
+python scripts\scaffold_draft.py "<workdir>" `
   --learner-language "<learner language>" `
-  --replace --in-place
+  --auto-repetitions
 ```
 
-Pass `--in-place` to automatically update `repetitionGroups` in the draft, or copy every candidate's `repetitionId` and `occurrences` verbatim into `repetitionGroups`. The grammar child may not invent or alter groups.
+This deterministic tool creates all baseline lines and blocks, aligns translation text, and discovers repetition candidates. **Agents must not hand-author 2,000+ lines of structural JSON or reverse-engineer internal python scripts (`v2lib.py`, `sidecarlib.py`, etc.).**
 
-Run `scripts\resolve_spans.py` to automatically verify or fix Unicode code-point spans:
+### Step 3.2: Enrich Phrases and Grammar Notes
+
+The grammar child enriches `semantic-draft.json` by adding high-value educational items:
+
+- `phrases`: Key vocabulary, idioms, compound expressions, or verb phrases with translations and grammatical labels.
+- `grammarNotes`: In-depth explanations of grammatical constructs, nuances, particle functions, or stylistic features.
+
+### Step 3.3: Resolve Spans and Validate
+
+Run `scripts\resolve_spans.py` to automatically compute and fix Unicode code-point spans for all added phrases and notes:
 
 ```powershell
 python scripts\resolve_spans.py `
   "<workdir>\semantic-draft.json" `
   --projection "<workdir>\source-projection.json" `
   --in-place
+```
+
+Verify that the draft passes all Schema v2 rules:
+
+```powershell
+python -X utf8 scripts\validate.py `
+  "<workdir>\semantic-draft.json" `
+  --projection "<workdir>\source-projection.json" `
+  --learner-language "<learner language>"
 ```
 
 After the child returns and the draft is final, the parent records the actual grammar-child identity:
@@ -148,7 +155,34 @@ If preparation fails, revise the semantic draft in a fresh grammar child. Do not
 
 Dispatch a fresh child whose transcript differs from the grammar child and parent. Give it the original LRC, frozen translation, candidate, candidate hash, read-only semantic draft for supporting context, and [references/semantic-audit-contract.md](references/semantic-audit-contract.md).
 
-The parent dispatches the child. The audit child writes only `semantic-audit.json`. It must review every candidate block and meaning unit and explicitly report unsupported additions, translation mismatches, shared drift, coverage gaps, and missing evidence.
+The audit child writes only `semantic-audit.json` following this fast, token-efficient workflow:
+
+### Step 5.1: Generate Summary and Audit Template
+
+Run `scripts\audit_summary.py` to inspect the candidate against frozen translations and pre-populate `semantic-audit.json` with all reviewed block and meaning unit IDs:
+
+```powershell
+python scripts\audit_summary.py "<workdir>" `
+  --emit-template "<workdir>\semantic-audit.json" `
+  --learner-language "<learner language>" `
+  --replace
+```
+
+This prints a concise 1-page alignment table of blocks, lines, translations, and synthesized meanings to stdout and pre-populates `semantic-audit.json` with `status: "pass"`. **The audit child must not dump thousands of lines of candidate JSON into context or write temporary python scripts.**
+
+### Step 5.2: Evaluate and Report
+
+Review the concise summary printed to stdout for:
+
+1. Unsupported additions (e.g. newly invented motives, scenes, relationships not in translation);
+2. Translation mismatches (effective block meaning deviating from accepted translation);
+3. Shared semantic drift across identical occurrences;
+4. Coverage gaps (uncovered lines or tails).
+
+- **If the candidate is faithful and accurate**: The pre-populated report is already valid and ready.
+- **If findings exist**: Edit `<workdir>\semantic-audit.json` to set `"status": "fail"` and append structured finding objects to `findings: [...]`.
+
+### Step 5.3: Self-Verify
 
 Validate the report:
 

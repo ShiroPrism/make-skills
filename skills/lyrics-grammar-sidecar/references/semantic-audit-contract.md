@@ -45,7 +45,20 @@ Warnings may be recorded without failing. Any error finding makes the audit fail
 }
 ```
 
-`reviewedBlockIds` and `reviewedMeaningUnitIds` must exactly match the IDs in the candidate, without omissions or duplicates. They can be extracted directly from the candidate: `reviewedBlockIds = [b["blockId"] for b in candidate["blocks"]]` and `reviewedMeaningUnitIds = [m["meaningUnitId"] for m in candidate["meaningUnits"]]`.
+`reviewedBlockIds` and `reviewedMeaningUnitIds` must exactly match the IDs in the candidate, without omissions or duplicates.
+
+To avoid manual ID extraction, JSON parsing, or temporary Python scripts, the auditor should use the deterministic `scripts\audit_summary.py` tool:
+
+```powershell
+python scripts\audit_summary.py "<workdir>" `
+  --emit-template "<workdir>\semantic-audit.json" `
+  --learner-language "<target>" `
+  --replace
+```
+
+This prints a concise 1-page alignment table of candidate blocks, source lines, frozen translations, and synthesized meanings, while automatically pre-populating `semantic-audit.json` with 100% complete `reviewedBlockIds` and `reviewedMeaningUnitIds`.
+
+Auditors must not dump multi-megabyte candidate JSON files into context or inspect internal Python scripts (`v2lib.py`, `sidecarlib.py`, etc.).
 
 Finding shape:
 

@@ -75,18 +75,18 @@ This verifies the bilingual handoff in `<song.lrc>` against the source projectio
 4. Dispatch a grammar child different from the parent:
 
 ```text
-Read and follow <grammar-skill>\SKILL.md and
-<grammar-skill>\references\draft-contract.md.
-Read only the original LRC, source projection, and frozen translated.lrc.
-Write only <workdir>\semantic-draft.json.
-Use learner language <target>.
-Inspect lines via Python; do not dump the full LRC into console output.
-You can run scripts\validate.py at any time during drafting to check your draft.
-Run discover_repetitions.py with --in-place after blocks are complete:
-  python scripts\discover_repetitions.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --workdir "<workdir>" --learner-language "<target>" --replace --in-place
-You can also run scripts\resolve_spans.py to automatically verify or fix Unicode code-point spans:
+Read and follow <grammar-skill>\SKILL.md and <grammar-skill>\references\draft-contract.md.
+Step 1: Run scaffold_draft.py to generate the initial compliant draft with lines, monotonic blocks, pre-synthesized meanings, and repetitions:
+  python scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions
+Step 2: Enrich the draft by adding educational phrases and grammarNotes with translations and explanations.
+Step 3: Run resolve_spans.py to automatically compute and fix code-point spans:
   python scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --in-place
-Do not write <song>.json, do not write isolation proofs, and do not alter the frozen translation.
+Step 4: Verify your draft passes 100% of validation rules:
+  python scripts\validate.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --learner-language "<target>"
+STRICT RULES:
+- Do not inspect or read internal scripts (v2lib.py, sidecarlib.py, etc.) or write scratch Python scripts.
+- Do not dump the full LRC or JSON files into context.
+- Write only <workdir>\semantic-draft.json. Do not write isolation proofs or <song>.json, and do not alter the frozen translation.
 ```
 
 5. After the grammar child returns, record the actual grammar-child identity:
@@ -125,16 +125,18 @@ If preparation fails, rerun grammar analysis in a new fresh transcript. Do not p
 
 ```text
 Read and follow <grammar-skill>\references\semantic-audit-contract.md.
-Audit <workdir>\analysis-candidate.json against the original LRC, frozen
-translated.lrc, and candidate SHA-256. The semantic draft is read-only
-supporting context; the candidate is the reviewed artifact.
-Write only <workdir>\semantic-audit.json.
-Do not write isolation-semantic-audit.json (the parent records isolation proofs).
-Inspect lines via Python; do not dump the full LRC into console output.
-Self-verify with scripts\validate_audit.py before returning.
-Do not edit the draft, candidate, hash, translation, or <song>.json.
-Do not inspect Python internals or search for schema files outside schema/v2/.
-Use learner language <target>.
+Step 1: Run audit_summary.py to inspect the candidate against frozen translations and emit the pre-populated audit template:
+  python scripts\audit_summary.py "<workdir>" --emit-template "<workdir>\semantic-audit.json" --learner-language "<target>"
+Step 2: Check the printed summary for meaning fidelity, unsupported additions, translation mismatches, or coverage gaps.
+  - If all candidate blocks and meaning units faithfully reflect the translation: the pre-populated template is already set to status "pass".
+  - If there are errors/warnings: edit <workdir>\semantic-audit.json to set status "fail" and add specific finding objects to findings.
+Step 3: Self-verify the report before returning:
+  python scripts\validate_audit.py "<workdir>\analysis-candidate.json" --candidate-hash "<workdir>\analysis-candidate.sha256" "<workdir>\semantic-audit.json" --learner-language "<target>"
+STRICT RULES:
+- Do not inspect or read internal scripts (v2lib.py, sidecarlib.py, etc.) or write scratch Python scripts.
+- Do not dump full LRC or JSON files into context.
+- Write only <workdir>\semantic-audit.json. Do not edit draft, candidate, hash, translation, or final sidecar.
+- Do not write isolation-semantic-audit.json (the parent records isolation proofs).
 ```
 
 The audit must review every candidate block and meaning-unit ID. It must reject unsupported additions, translation mismatches, shared semantic drift, coverage gaps, and missing source evidence.
