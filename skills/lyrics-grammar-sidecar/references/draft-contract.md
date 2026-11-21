@@ -4,6 +4,8 @@
 
 The draft must be based on the original LRC and the accepted, frozen `translated.lrc`. The deterministic pipeline normalizes projected source fields, discovers exact repetition candidates, creates `analysis-candidate.json`, and later requires an independent semantic audit.
 
+The grammar projection keeps timed title/artist header rows and excludes credit rows, empty rows, and non-timed tags. Title rows are metadata blocks, not scrollable lyric lines. The production JSON is self-contained: recipients need only a sibling LRC with the same NFC source text order; timestamps may differ and the App re-anchors by text. `translation-manifest.json` and `.grammar-work` are audit inputs, not distribution requirements.
+
 ## Pipeline Boundary
 
 ```text
@@ -89,6 +91,8 @@ Copy every line from `source-projection.json`, add `language`, and optionally ad
 ```
 
 `start` and `end` are Unicode code-point indexes, not UTF-16 units or byte offsets. In Python 3, `len(str)` and string slicing `str[start:end]` operate natively on Unicode code points. Calculate spans programmatically using `start = line_text.index(sub_text)` and `end = start + len(sub_text)` to avoid off-by-one errors from manual character counting. Alternatively, run `python scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --in-place` to automatically calculate and populate code-point spans. The preparer rebuilds every projected source field from the frozen projection; a model-side edit fails with `stale_source_projection`.
+
+Block `lineIds` must follow `sourceOrder`. Member `timeMs` values may be non-monotonic after user timeline calibration; block `startTimeMs` / `endTimeMs` are the member minimum / maximum.
 
 ## Repetition Discovery
 

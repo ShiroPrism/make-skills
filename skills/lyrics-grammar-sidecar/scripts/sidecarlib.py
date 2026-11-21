@@ -417,9 +417,10 @@ def _is_credit_line(text: str) -> bool:
 def parse_lrc_rows(path: Path) -> list[LrcRow]:
     """Return timestamped, non-empty lyric rows in physical file order.
 
-    Mirrors the App's LRC parsing contract: one leading timestamp per row,
-    optional 1-3 fractional digits, leading whitespace consumed, credit lines
-    excluded, and only whitespace-empty rows discarded.
+    Mirrors the App's grammar projection contract: one leading timestamp per
+    row, optional 1-3 fractional digits, leading whitespace consumed, credit
+    lines excluded, timed title/artist header rows retained, and only
+    whitespace-empty rows discarded.
     """
 
     lrc_path = ensure_local_lrc(path)

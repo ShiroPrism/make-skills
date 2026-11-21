@@ -1154,19 +1154,6 @@ def _validate_blocks(
                     "Block lineIds do not follow sourceOrder.",
                 )
             )
-        line_times: list[int] = []
-        for line in resolved_lines:
-            line_time = line.get("timeMs")
-            if isinstance(line_time, int) and not isinstance(line_time, bool):
-                line_times.append(line_time)
-        if line_times != sorted(line_times):
-            issues.append(
-                Issue(
-                    "non_monotonic_block",
-                    path + ".lineIds",
-                    "Block line timestamps decrease as source order advances.",
-                )
-            )
         start_time = block.get("startTimeMs")
         end_time = block.get("endTimeMs")
         if (

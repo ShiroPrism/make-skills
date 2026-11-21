@@ -8,11 +8,13 @@ Entry point: `skills/sakurauta-lyrics-workflow/SKILL.md`.
 
 The parent coordinates three fresh child roles:
 
-1. **Translation child** reads the unchanged `skills/lyrics-translator/SKILL.md` directly and produces an accepted bilingual LRC. There is no translation wrapper Skill.
+1. **Translation child** reads the unchanged `skills/lyrics-translator/SKILL.md` directly and produces an accepted bilingual LRC. There is no translation wrapper Skill. If the LRC is already an accepted bilingual file, skip this child and enter grammar-only mode.
 2. **Grammar child** reads `skills/lyrics-grammar-sidecar/SKILL.md` and its v2 draft contract. It authors only `semantic-draft.json`; deterministic tools write the repetition-candidate list and freeze the analysis candidate.
 3. **Semantic-audit child** is a different fresh transcript. It reviews `analysis-candidate.json` against the original LRC and frozen translation, then writes only `semantic-audit.json`.
 
 The parent never self-audits semantics. Only the deterministic finalizer writes the production sibling JSON.
+
+The production JSON is self-contained. Recipients need only a sibling LRC with the same NFC source text order; timestamps may differ and SakuraUta re-anchors by text. `.grammar-work`, `translated.lrc`, and `translation-manifest.json` are generation/audit artifacts, not distribution requirements. The grammar projection keeps timed title/artist header rows; the App's lyric display still hides them.
 
 Schema v1 is not accepted or migrated. Existing v1 files must be regenerated.
 

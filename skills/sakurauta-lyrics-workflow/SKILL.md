@@ -1,7 +1,7 @@
 ---
 name: sakurauta-lyrics-workflow
 description: Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation, grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered.
-version: 2.2.1
+version: 2.2.2
 ---
 
 # SakuraUta Lyrics Workflow v2
@@ -14,9 +14,12 @@ The parent coordinates three independent child roles. It does not translate, inv
 
 Only the deterministic finalizer writes `<song>.json`.
 
+Translation is optional when the LRC is already an accepted bilingual file. It is a prerequisite only when the user needs a new translation; the grammar Sidecar itself is not runtime-dependent on `lyrics-translator`.
+
 ## Inputs
 
 - local source `.lrc`;
+- an accepted bilingual `.lrc` (optional; if absent, Phase 1 translation is required);
 - target learner language, for example `zh-CN`;
 - SakuraUta `songId` (default: LRC basename without `.lrc`).
 
@@ -25,6 +28,17 @@ Work directory: `<song>.grammar-work` beside the source.
 Quote all file paths in PowerShell commands (especially when titles contain special characters like semicolons `;`, ampersands `&`, dollars `$`, or apostrophes `'`).
 
 Reject video, subtitle, remote, non-LRC, network-share, and symlinked inputs.
+
+## Grammar-only Mode
+
+Use this mode when the user only wants a grammar Sidecar and already has an accepted bilingual LRC:
+
+1. Skip the translation child entirely.
+2. Start at `project_source.py` on the existing `<song>.lrc`.
+3. Freeze the accepted bilingual LRC with `verify_translation.py` (pass the alternate path if needed).
+4. Continue with grammar analysis, audit, and finalize.
+
+If the LRC is source-only, stop with `ERROR [translation-required]` and ask for a translation. Do not invent learner-facing meaning from source-only lyrics.
 
 ## Isolation Gate
 
@@ -40,7 +54,7 @@ Never fall back to inline translation, grammar analysis, or self-audit.
 
 ## Phase 1: Translate and Freeze
 
-1. Dispatch a fresh translation child (skip if `<song.lrc>` is already bilingual and accepted):
+1. Dispatch a fresh translation child only when `<song.lrc>` is not already bilingual and accepted:
 
 ```text
 Read and follow <skills>\lyrics-translator\SKILL.md.
@@ -68,7 +82,7 @@ python <grammar-skill>\scripts\verify_translation.py `
   --workdir "<workdir>"
 ```
 
-This verifies the bilingual handoff in `<song.lrc>` against the source projection, freezes a snapshot to `<workdir>\translated.lrc`, and writes `translation-manifest.json`. (If the accepted translation resides in an alternate file, pass that path as `<accepted-lrc>` instead). The parent owns acceptance. Do not proceed if freezing fails. Do not edit `translated.lrc` after this point.
+This verifies the bilingual handoff in `<song.lrc>` against the source projection, freezes a snapshot to `<workdir>\translated.lrc`, and writes `translation-manifest.json`. (If the accepted translation resides in an alternate file, pass that path as `<accepted-lrc>` instead). The parent owns acceptance. Do not proceed if freezing fails. Do not edit `translated.lrc` after this point. The freeze is an audit snapshot; the production JSON remains self-contained and does not require recipients to ship `.grammar-work`.
 
 ## Phase 2: Fresh Grammar Analysis
 
@@ -266,7 +280,7 @@ Because grammar analysis and semantic audit are in-depth multi-minute tasks, the
 ## Boundaries
 
 - `<skills>` contains this Skill, `lyrics-translator`, and `lyrics-grammar-sidecar`.
-- Translation remains byte-for-byte owned by `lyrics-translator`.
+- Translation remains byte-for-byte owned by `lyrics-translator` when translation is needed; it is not a runtime dependency of the Sidecar.
 - Grammar semantics are authored by the fresh grammar child.
 - Semantic approval is owned by the different fresh audit child, never the grammar child or parent.
 - Deterministic scripts own Schema v2, repetition discovery/completion, source/span validation, hash chaining, isolation verification, and atomic writes.

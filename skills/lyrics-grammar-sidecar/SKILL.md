@@ -1,7 +1,7 @@
 ---
 name: lyrics-grammar-sidecar
 description: Generate, validate, audit, and finalize SakuraUta Schema v2 lyrics grammar sidecars from local LRCs, frozen bilingual LRCs, deterministic repetition candidates, and independent semantic-audit children. Supports single-file and directory-wide batch processing.
-version: 2.2.1
+version: 2.2.2
 ---
 
 # Lyrics Grammar Sidecar v2
@@ -12,9 +12,9 @@ Schema v1 is unsupported. Do not dual-read, migrate, adapt, or fall back.
 
 ## Roles and Boundary
 
-The overall workflow uses three fresh child roles:
+The overall workflow uses up to three fresh child roles:
 
-1. translate with the unchanged `lyrics-translator` Skill;
+1. translate only when the source LRC is not already an accepted bilingual LRC; the unchanged `lyrics-translator` Skill is the default translator, not a runtime dependency;
 2. analyze grammar in a fresh grammar child;
 3. audit semantics in a different fresh audit child.
 
@@ -27,12 +27,19 @@ Only `finalize.py` writes the production sibling `<song>.json`.
 ## Required Inputs
 
 - original local `.lrc`;
+- an accepted bilingual `.lrc` (any provenance; it may already be the original file or an alternate path);
 - `<song>.grammar-work/source-projection.json`;
-- accepted and frozen `<song>.grammar-work/translated.lrc` plus `translation-manifest.json`;
+- frozen `<song>.grammar-work/translated.lrc` plus `translation-manifest.json` (the freeze is an audit snapshot, not a distribution requirement);
 - target learner language, for example `zh-CN`;
 - real non-forked transcript IDs for grammar analysis and semantic audit.
 
 Reject video, subtitle, remote, network-share, non-LRC, and symlinked source inputs.
+
+## Grammar-only and Distribution
+
+- If `<song>.lrc` already contains an accepted translation, skip the translation child and start at source projection. If no accepted bilingual LRC exists, stop and ask for translation; do not invent learner-facing meaning from source-only lyrics.
+- The production `<song>.json` is self-contained. A recipient only needs a sibling LRC whose NFC source text order matches the analyzed source. Timestamps may differ; the App re-anchors by text. Translation rows and `.grammar-work` are not required for distribution.
+- Keep `source.lrcProjectionHash` as exact/provenance metadata. It is not the consumer's availability gate.
 
 ## 1. Project the Source
 
@@ -45,9 +52,11 @@ Default output: `<song-dir>/<song>.grammar-work/source-projection.json`.
 
 The projection owns line IDs, source order, timestamps, fingerprints, source text, and the projection hash. Later stages may not rewrite them.
 
+The grammar projection keeps timed title/artist header rows (for example `[00:00.00]Song - Artist`) and excludes credit rows, empty rows, and non-timed tags. This matches the App's grammar projection. The App's scrolling lyrics / indexing parser still hides title and credit rows from the lyric display.
+
 ## 2. Freeze the Accepted Translation
 
-The translation is produced by the unchanged `lyrics-translator` Skill on `<song.lrc>`. After the user accepts it:
+When translation is needed, it is produced by the unchanged `lyrics-translator` Skill on `<song.lrc>`. If an accepted bilingual LRC already exists, freeze that path directly. After the user accepts it:
 
 ```powershell
 python scripts\verify_translation.py `
@@ -57,6 +66,8 @@ python scripts\verify_translation.py `
 ```
 
 This writes `translated.lrc` and `translation-manifest.json`. (If an alternate accepted bilingual path was used, pass that instead). A later edit fails closed.
+
+`translated.lrc` / `translation-manifest.json` bind the grammar and audit children to one reviewed snapshot. They do not bind the production Sidecar to the recipient's LRC.
 
 ## 3. Fresh Grammar Child
 
@@ -325,6 +336,7 @@ Deterministic validation owns:
 - composed meaning coverage and boundary punctuation;
 - references, multi-block scopes, learner language, HTML/path guards;
 - candidate/audit/proof hash chain and atomic writes.
+- source-order monotonic blocks; block member timestamps may be non-monotonic after user timeline calibration, and block start/end are the member minimum/maximum.
 
 It does not decide whether prose is faithful. That is the independent audit child's responsibility. The generation child must never self-approve its own semantic audit.
 

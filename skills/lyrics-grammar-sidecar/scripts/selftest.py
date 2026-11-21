@@ -2121,6 +2121,30 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         )
         self.assertEqual(before, pretty_json(document))
 
+    def test_block_times_may_be_non_monotonic_when_source_order_is_stable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "non-monotonic.lrc"
+            source.write_text(
+                "[00:03.00]first line\n"
+                "[00:02.00]second line\n"
+                "[00:04.00]third line\n",
+                encoding="utf-8",
+            )
+            projection = source_projection_from_lrc(
+                source, "Fixture - Non Monotonic"
+            )
+            document = simple_document(
+                projection,
+                source_language="en",
+                learner_language="zh-CN",
+                meaning_text="三行歌词组成一个学习块。",
+                explanation="块内时间可以倒序，但源顺序保持稳定。",
+                gloss="非单调时间块",
+            )
+            self.assert_valid(document, projection, "zh-CN")
+
     def test_repetition_fixture_three_occurrences_changed_tail_and_override(
         self,
     ) -> None:
