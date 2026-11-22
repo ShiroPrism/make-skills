@@ -1,7 +1,8 @@
 ---
 name: lyrics-translator
 description: High-fidelity lyric translation across global languages (dedicated profiles for ZH, JA, KO, EN, FR, ES, DE, IT, PT, RU, TH, VI, YUE, plus generic fallback). Implements an Adversarial 3-Stage Pipeline (Initial Translation → Independent Falsification Review in fresh context → Arbitration & Polish) to eliminate confirmation bias and contextual contradictions like literal idiom traps. Supports single-file and directory-wide sliding-window batch translation. Preserves source lines and inserts exactly one target-language line below each.
-version: 2.0.0
+metadata:
+  version: "2.0.0"
 ---
 
 # Lyric Translator — Adversarial 3-Stage Pipeline

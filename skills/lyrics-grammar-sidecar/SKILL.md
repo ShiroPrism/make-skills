@@ -1,7 +1,8 @@
 ---
 name: lyrics-grammar-sidecar
 description: Generate, validate, audit, and finalize SakuraUta Schema v2 lyrics grammar sidecars from local LRCs, frozen bilingual LRCs, deterministic repetition candidates, and independent semantic-audit children. Supports single-file and directory-wide batch processing.
-version: 2.2.3
+metadata:
+  version: "2.2.3"
 ---
 
 # Lyrics Grammar Sidecar v2

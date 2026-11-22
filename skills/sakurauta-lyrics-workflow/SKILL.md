@@ -1,7 +1,8 @@
 ---
 name: sakurauta-lyrics-workflow
-description: Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation (Adversarial 3-Stage Pipeline: Translator → Reviewer in clean context → Arbiter/Merge), grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered.
-version: 2.3.0
+description: "Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation (Adversarial 3-Stage Pipeline: Translator → Reviewer in clean context → Arbiter/Merge), grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered."
+metadata:
+  version: "2.3.0"
 ---
 
 # SakuraUta Lyrics Workflow v2
