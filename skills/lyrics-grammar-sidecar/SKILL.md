@@ -1,7 +1,7 @@
 ---
 name: lyrics-grammar-sidecar
 description: Generate, validate, audit, and finalize SakuraUta Schema v2 lyrics grammar sidecars from local LRCs, frozen bilingual LRCs, deterministic repetition candidates, and independent semantic-audit children. Supports single-file and directory-wide batch processing.
-version: 2.2.2
+version: 2.2.3
 ---
 
 # Lyrics Grammar Sidecar v2
@@ -350,4 +350,4 @@ Run from any current directory:
 python scripts\selftest.py
 ```
 
-The standard-library-only suite generates every prepare -> audit -> finalize chain in a temporary workdir. Its only committed repetition case is the compact `fixtures/repetition` input set (source LRC, accepted translation, semantic draft, and final sidecar golden), so candidate, audit, isolation-proof, and validation-report copies are not duplicated in the repository. Coverage includes exact maximal and changed-tail repetition, three occurrences, overlap, line-break variation, cross-line NFC composition, internal whitespace, fuzzy non-matches, metadata exclusion, missing/wrong shared occurrences, blank overrides, meaning coverage, boundary punctuation, strict JSON, path and HTML guards, audit pass/fail, proof/hash/canonical-byte tamper, v1 rejection, and atomic finalization.
+The standard-library-only suite generates every prepare -> audit -> finalize chain in a temporary workdir. Its only committed repetition case is the compact `fixtures/repetition` input set (source LRC, accepted translation, semantic draft, and final sidecar golden), so candidate, audit, isolation-proof, and validation-report copies are not duplicated in the repository. Fixture LRC inputs are committed as `.txt` so distribution platforms that reject `.lrc` uploads can still carry the suite; the tests stage them to temporary `.lrc` files before parsing. Coverage includes exact maximal and changed-tail repetition, three occurrences, overlap, line-break variation, cross-line NFC composition, internal whitespace, fuzzy non-matches, metadata exclusion, missing/wrong shared occurrences, blank overrides, meaning coverage, boundary punctuation, strict JSON, path and HTML guards, audit pass/fail, proof/hash/canonical-byte tamper, v1 rejection, and atomic finalization.

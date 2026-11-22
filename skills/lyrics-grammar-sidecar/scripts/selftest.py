@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import atexit
 import copy
 import os
 import subprocess
@@ -62,6 +63,31 @@ GOLDEN_VECTORS = read_json(FIXTURES / "golden-vectors.json")
 REPETITION_DIR = FIXTURES / "repetition"
 REPETITION_SONG_ID = "Fixture - Repetition Pattern"
 REPETITION_BLOCK_IDS = ("b_repeat1", "b_repeat2", "b_repeat3")
+_LRC_FIXTURE_STAGE = tempfile.TemporaryDirectory(
+    prefix="lyrics-grammar-sidecar-fixtures-"
+)
+_LRC_FIXTURE_ROOT = Path(_LRC_FIXTURE_STAGE.name)
+atexit.register(_LRC_FIXTURE_STAGE.cleanup)
+
+
+def staged_fixture_lrc(path: Path) -> Path:
+    """Materialize a committed .txt LRC fixture as a temporary .lrc file."""
+
+    relative = path.relative_to(FIXTURES)
+    if relative.suffix != ".txt":
+        raise ValueError(f"Not an LRC text fixture: {path}")
+    staged = _LRC_FIXTURE_ROOT / relative.with_suffix(".lrc")
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    if not staged.exists():
+        staged.write_bytes(path.read_bytes())
+    return staged
+
+
+JA_SOURCE_LRC = staged_fixture_lrc(FIXTURES / "ja" / "source.txt")
+JA_TRANSLATED_LRC = staged_fixture_lrc(FIXTURES / "ja" / "translated.txt")
+EN_SOURCE_LRC = staged_fixture_lrc(FIXTURES / "en" / "source.txt")
+EN_TRANSLATED_LRC = staged_fixture_lrc(FIXTURES / "en" / "translated.txt")
+KO_TRANSLATED_LRC = staged_fixture_lrc(FIXTURES / "ko" / "translated.txt")
 
 
 def labels(namespace: str, key: str) -> list[dict[str, str]]:
@@ -352,14 +378,14 @@ def two_block_repeat_document(
 
 def repetition_projection() -> dict:
     return source_projection_from_lrc(
-        REPETITION_DIR / "source.lrc",
+        staged_fixture_lrc(REPETITION_DIR / "source.txt"),
         REPETITION_SONG_ID,
     )
 
 
 def stage_repetition_fixture(base: Path) -> dict[str, Any]:
     source = base / "source.lrc"
-    source.write_bytes((REPETITION_DIR / "source.lrc").read_bytes())
+    source.write_bytes((REPETITION_DIR / "source.txt").read_bytes())
     projection = source_projection_from_lrc(source, REPETITION_SONG_ID)
     projection_path = base / "source-projection.json"
     write_json_atomic(projection_path, projection)
@@ -368,7 +394,7 @@ def stage_repetition_fixture(base: Path) -> dict[str, Any]:
     work.mkdir()
     _translated, _manifest, issues = write_accepted_translation(
         projection,
-        REPETITION_DIR / "translated.lrc",
+        staged_fixture_lrc(REPETITION_DIR / "translated.txt"),
         work,
     )
     if issues:
@@ -517,8 +543,12 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         }
         for directory, (source_language, learner_language) in cases.items():
             with self.subTest(directory=directory):
-                source = FIXTURES / directory / "source.lrc"
-                translated = FIXTURES / directory / "translated.lrc"
+                source = staged_fixture_lrc(
+                    FIXTURES / directory / "source.txt"
+                )
+                translated = staged_fixture_lrc(
+                    FIXTURES / directory / "translated.txt"
+                )
                 projection = source_projection_from_lrc(
                     source,
                     {
@@ -545,7 +575,8 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_edge_fixture_uses_code_point_spans(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "edge" / "source.lrc", "Fixture - Unicode Edge"
+            staged_fixture_lrc(FIXTURES / "edge" / "source.txt"),
+            "Fixture - Unicode Edge",
         )
         sidecar = read_json(FIXTURES / "edge" / "sidecar.json")
         self.assert_valid(sidecar, projection, "zh-CN")
@@ -682,7 +713,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             GOLDEN_VECTORS["v2"]["repetitionFixture"]["sharedPrefixOccurrences"],
         )
         self.assertEqual(
-            "repetition/source.lrc",
+            "repetition/source.txt",
             GOLDEN_VECTORS["v2"]["repetitionFixture"]["sourceLrc"],
         )
         self.assertEqual(
@@ -694,7 +725,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             GOLDEN_VECTORS["v2"]["repetitionFixture"]["semanticDraft"],
         )
         self.assertEqual(
-            "repetition/translated.lrc",
+            "repetition/translated.txt",
             GOLDEN_VECTORS["v2"]["repetitionFixture"]["translatedLrc"],
         )
 
@@ -719,7 +750,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_committed_invalid_fixtures_are_v2_and_rejected(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         invalid_references = read_json(
             FIXTURES / "invalid" / "invalid-references.json"
@@ -1111,7 +1142,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_meaning_parts_must_cover_every_block_line(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         document = simple_document(
             projection,
@@ -1258,7 +1289,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_override_requires_reason_and_is_explicit(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         document = simple_document(
             projection,
@@ -1373,7 +1404,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_v1_documents_and_proofs_are_rejected(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         v1 = {
             "schema": "sakurauta.lyrics-grammar-analysis",
@@ -1447,7 +1478,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_candidate_normalization_uses_projected_source_fields(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         document = simple_document(
             projection,
@@ -1471,7 +1502,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_source_identity_checks_work_without_a_projection(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         document = simple_document(
             projection,
@@ -1529,7 +1560,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_html_and_per_line_translation_fields_fail(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         document = simple_document(
             projection,
@@ -1575,7 +1606,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_learner_language_is_required_v2(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         document = simple_document(
             projection,
@@ -1628,7 +1659,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_semantic_audit_pass_fail_and_review_coverage(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         candidate = simple_document(
             projection,
@@ -1681,7 +1712,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_isolation_requires_distinct_stage_bound_children(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         with tempfile.TemporaryDirectory() as temp:
             draft_path = Path(temp) / "semantic-draft.json"
@@ -1904,7 +1935,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             source = base / "source.lrc"
-            source.write_bytes((FIXTURES / "ja" / "source.lrc").read_bytes())
+            source.write_bytes(JA_SOURCE_LRC.read_bytes())
             projection = source_projection_from_lrc(
                 source, "Fixture - Japanese Promise"
             )
@@ -1913,7 +1944,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             work = base / "source.grammar-work"
             work.mkdir()
             write_accepted_translation(
-                projection, FIXTURES / "ja" / "translated.lrc", work
+                projection, JA_TRANSLATED_LRC, work
             )
             draft = simple_document(
                 projection,
@@ -2024,14 +2055,14 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             source = base / "source.lrc"
-            source.write_bytes((FIXTURES / "en" / "source.lrc").read_bytes())
+            source.write_bytes(EN_SOURCE_LRC.read_bytes())
             projection = source_projection_from_lrc(
                 source, "Fixture - English Horizon"
             )
             work = base / "source.grammar-work"
             work.mkdir()
             translated, manifest, issues = write_accepted_translation(
-                projection, FIXTURES / "en" / "translated.lrc", work
+                projection, EN_TRANSLATED_LRC, work
             )
             self.assertEqual([], issues)
             self.assertEqual([], validate_manifest(manifest))
@@ -2048,7 +2079,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             source = base / "source.lrc"
-            source.write_bytes((FIXTURES / "ja" / "source.lrc").read_bytes())
+            source.write_bytes(JA_SOURCE_LRC.read_bytes())
             projection = source_projection_from_lrc(
                 source, "Fixture - Japanese Promise"
             )
@@ -2057,7 +2088,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             work = base / "source.grammar-work"
             work.mkdir()
             write_accepted_translation(
-                projection, FIXTURES / "ja" / "translated.lrc", work
+                projection, JA_TRANSLATED_LRC, work
             )
             draft = simple_document(
                 projection,
@@ -2101,7 +2132,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_validation_does_not_mutate_document(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         document = simple_document(
             projection,
@@ -2153,8 +2184,8 @@ class GrammarSidecarV2Tests(unittest.TestCase):
                 ".gitattributes",
                 "semantic-draft.json",
                 "sidecar.json",
-                "source.lrc",
-                "translated.lrc",
+                "source.txt",
+                "translated.txt",
             },
             {path.name for path in REPETITION_DIR.iterdir()},
         )
@@ -2249,7 +2280,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
 
     def test_load_projection_exposes_invalid_projection(self) -> None:
         projection = source_projection_from_lrc(
-            FIXTURES / "ja" / "source.lrc", "Fixture - Japanese Promise"
+            JA_SOURCE_LRC, "Fixture - Japanese Promise"
         )
         self.assertEqual([], validate_projection(projection))
         tampered = copy.deepcopy(projection)
@@ -2261,9 +2292,9 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             source = base / "cli-source.lrc"
-            source.write_bytes((FIXTURES / "ja" / "source.lrc").read_bytes())
+            source.write_bytes(JA_SOURCE_LRC.read_bytes())
             accepted = base / "accepted.lrc"
-            accepted.write_bytes((FIXTURES / "ja" / "translated.lrc").read_bytes())
+            accepted.write_bytes(JA_TRANSLATED_LRC.read_bytes())
             work = base / "cli-source.grammar-work"
             projection_path = work / "source-projection.json"
 
@@ -2418,7 +2449,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             source = base / "cli-source.lrc"
-            source.write_bytes((FIXTURES / "ja" / "source.lrc").read_bytes())
+            source.write_bytes(JA_SOURCE_LRC.read_bytes())
             work = base / "cli-source.grammar-work"
             projection_path = work / "source-projection.json"
 
@@ -2495,9 +2526,9 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             src_a = base / "song_a.lrc"
-            src_a.write_bytes((FIXTURES / "ja" / "translated.lrc").read_bytes())
+            src_a.write_bytes(JA_TRANSLATED_LRC.read_bytes())
             src_b = base / "song_b.lrc"
-            src_b.write_bytes((FIXTURES / "ko" / "translated.lrc").read_bytes())
+            src_b.write_bytes(KO_TRANSLATED_LRC.read_bytes())
 
             # 1. Batch project_source
             self.run_cli(
@@ -2752,9 +2783,9 @@ class GrammarSidecarV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             source = base / "cli-source.lrc"
-            source.write_bytes((FIXTURES / "ja" / "source.lrc").read_bytes())
+            source.write_bytes(JA_SOURCE_LRC.read_bytes())
             accepted = base / "accepted.lrc"
-            accepted.write_bytes((FIXTURES / "ja" / "translated.lrc").read_bytes())
+            accepted.write_bytes(JA_TRANSLATED_LRC.read_bytes())
             work = base / "cli-source.grammar-work"
             projection_path = work / "source-projection.json"
 

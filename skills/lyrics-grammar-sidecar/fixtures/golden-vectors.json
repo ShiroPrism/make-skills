@@ -26,10 +26,10 @@
       }
     },
     "repetitionFixture": {
-      "sourceLrc": "repetition/source.lrc",
+      "sourceLrc": "repetition/source.txt",
       "fixture": "repetition/sidecar.json",
       "semanticDraft": "repetition/semantic-draft.json",
-      "translatedLrc": "repetition/translated.lrc",
+      "translatedLrc": "repetition/translated.txt",
       "sharedPrefixOccurrences": 3,
       "changedTailOccurrences": 2,
       "hasExplicitOverride": true,
