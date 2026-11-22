@@ -1,146 +1,109 @@
 ---
 name: lyrics-translator
-description: Translate song lyrics across all global languages (with dedicated profiles for Chinese/ZH, Japanese/JA, Korean/KO, English/EN, French/FR, Spanish/ES, German/DE, Italian/IT, Portuguese/PT, Russian/RU, Thai/TH, Vietnamese/VI, Cantonese/YUE, and extensible generic fallback for all others) in .lrc, .txt, or .md files. Supports single-file and directory-wide batch translation. Automatically activates batch mode when translating a directory, multiple files, or when scanning discovers multiple lyrics files. Preserves the source line and inserts exactly one target-language line below it.
-version: 1.1.0
+description: High-fidelity lyric translation across global languages (dedicated profiles for ZH, JA, KO, EN, FR, ES, DE, IT, PT, RU, TH, VI, YUE, plus generic fallback). Implements an Adversarial 3-Stage Pipeline (Initial Translation → Independent Falsification Review in fresh context → Arbitration & Polish) to eliminate confirmation bias and contextual contradictions like literal idiom traps. Supports single-file and directory-wide sliding-window batch translation. Preserves source lines and inserts exactly one target-language line below each.
+version: 2.0.0
 ---
 
-# Lyric Translator — Bilingual Interleaved Lyrics
+# Lyric Translator — Adversarial 3-Stage Pipeline
 
-Translate across global languages with dedicated profiles and an extensible architecture. Keep instructions in English; do not translate the core prompt or duplicate rules by direction.
+High-fidelity lyric translation across global languages with dedicated linguistic profiles, strict anti-confirmation bias architecture, and deterministic timeline validation.
+
+---
+
+## Quality-First Philosophy
+
+Translating song lyrics differs fundamentally from standard prose: lyrics are cohesive artistic units defined by metaphor, persona, subtext, and rhythmic cadence. Single-agent self-review suffers from severe confirmation bias (e.g., mechanically translating cynical rhetorical questions like 「もういいかい？」 as children's hide-and-seek "藏好了吗？").
+
+To guarantee maximum quality, this skill enforces a **Three-Stage Adversarial Pipeline (三阶段对冲流水线)** for every song:
+
+```
+[Original LRC]
+      ↓
+[Step 0: lrc_strip.py] → .tmp.txt
+      ↓
+[Stage 1: Initial Translator (roles/translator.md)]
+      ↓ (Handover: Draft .tmp.txt + Song Persona Memo)
+[Stage 2: Adversarial Reviewer (roles/reviewer.md)] ⚠️ Clean Isolated Context
+      ↓ (Issue Directives: Mandatory Critical Fixes & Rhythm Suggestions)
+[Stage 3: Arbiter & Finalizer (roles/arbiter.md)]
+      ↓ (Adoption Arbitration + Target Cadence Polish)
+[Step 4: lrc_merge.py] → Final Bilingual LRC [OK]
+```
+
+---
 
 ## Translation Mode
 
-Detect which mode the user wants. Default to **reading mode** unless the user says "翻唱", "cover version", "singable translation", "翻配", or explicitly requests rhyme/rhythm matching.
+Default to **reading mode** unless the user says "翻唱", "cover version", "singable translation", "翻配", or explicitly requests rhyme/rhythm matching.
 
-| Mode | Priority | When to use |
+| Mode | Priority | When to Use |
 | :-- | :-- | :-- |
-| **Reading** (default) | Semantic integrity > naturalness > singability | Bilingual subtitles, lyric booklets, understanding foreign songs |
+| **Reading** (default) | Semantic integrity > naturalness > singability | Bilingual subtitles, lyric booklets, foreign song comprehension |
 | **Cover/Singing** | Singability + rhythm + rhyme > literalness | Creating a performable version in the target language |
 
-In **reading mode**, follow the standard workflow below. In **cover mode**, additionally load the selected target profile's rhythm rules as hard constraints and actively pursue natural rhyme patterns (near-rhyme is acceptable; forced rhyme that distorts meaning is not).
+---
 
-## Workflow
+## Pipeline Execution Details
 
-1. Detect file mode. For `.lrc`, run this skill's `scripts/lrc_strip.py` to produce a same-directory `.tmp.txt` working file. For `.txt` and `.md`, work on the original file.
-2. Detect **primary** source and target languages. Use the user's explicit direction first, then filename hints, then lyrics inspection:
-   - **Kana** (平假名/片假名) → `ja`
-   - **Hangul** (한글) → `ko`
-   - **Cyrillic** (Русский) → `ru`
-   - **Thai script** (ภาษาไทย) → `th`
-   - **Vietnamese diacritics** (đ, ơ, ư, ả, ã, ạ, ắ...) → `vi`
-   - **CJK ideographs without kana/Hangul**:
-     - Contains vernacular Cantonese particles (嘅, 咗, 仲, 唔, 咁, 哋, 乜, 點) or tagged in title/album → `yue`
-     - Otherwise → `zh`
-   - **Latin script**:
-     - German markers (ä, ö, ü, ß) → `de`
-     - French markers (é, è, ê, ç, œ, à, ù) → `fr`
-     - Spanish markers (ñ, ¿, ¡, á, é, í, ó, ú) → `es`
-     - Portuguese markers (ã, õ, ç, ê) → `pt`
-     - Italian vocabulary and characteristic vocalic endings → `it`
-     - English vocabulary (the, you, I, my, we, and) → `en`
-     - Other languages → identify ISO 639-1 code (e.g. `ar`, `hi`, `el`, `nl`, `sv`, `tr`, etc.).
-   - Ask only if the target or source language remains ambiguous.
-   - **Multi-language blocks**: Some songs contain blocks of lyrics in different languages (e.g., several lines in Japanese, then several lines in English, then back to Japanese). Detection of secondary source languages happens during Step 1 of `reference/common.md`.
-3. Handle existing translations:
-   - **No existing translations**: proceed normally.
-   - **Existing translations in the same target language**: ask the user whether to keep, overwrite, or skip each section. If the user says "重新翻译" or "redo", overwrite all.
-   - **Existing translations in a different language**: treat them as non-source lines — pass through unchanged. Insert the new target-language translation below the source line only.
-4. Before editing, load reference files dynamically:
-   - `reference/common.md`
-   - **Source profile**: `reference/source/{source}.md` if it exists; otherwise fall back to `reference/source/generic.md`.
-   - **Target profile**: `reference/target/{target}.md` if it exists; otherwise fall back to `reference/target/generic.md`.
-   - **Pair exceptions**: `reference/pair-exceptions.md` if an entry matching `{source}→{target}` or their language families exists.
-   - If Step 1 of common.md detected secondary source languages, load each `reference/source/{secondary}.md` (or `generic.md`) at that point.
-5. Follow the numbered workflow in `reference/common.md`. Read the complete working file before writing; make one editing pass; run this skill's `scripts/lrc_merge.py` only after quality checks pass.
+### Stage 1: Initial Translation (`roles/translator.md`)
 
-## Extensible Language Support (We are the World)
+Dispatched to translate the raw lyrics stripped by `lrc_strip.py`:
 
-This skill utilizes an open, modular language architecture:
+1. **Pre-read & Persona**: Reads the full song to establish the 1–2 sentence Song Persona (speaker, listener, emotional arc, register).
+2. **Language Reference Loading**:
+   - `reference/common.md`: Absolute red lines, semantic integrity guards, special line rules.
+   - `reference/source/{source}.md`: Source-specific grammar signals (e.g., Japanese `て`-form chains, omitted subjects).
+   - `reference/target/{target}.md`: Target breath units (4–16 characters for Chinese), register rules.
+   - `reference/pair-exceptions.md`: False-friend kanji/cognates.
+3. **Semantic Chunking & Drafting**: Groups dependent clauses into semantic blocks; writes initial translation draft directly into `.tmp.txt`.
+4. **Handover**: Outputs the Song Persona memo and flags potential ambiguities for the Reviewer.
 
-- **Dedicated Profiles**: High-frequency music languages have hand-crafted profiles in `reference/source/` and `reference/target/`:
-  - East Asian: `zh` (Mandarin), `ja` (Japanese), `ko` (Korean), `yue` (Cantonese)
-  - Southeast Asian: `th` (Thai), `vi` (Vietnamese)
-  - European / Romance: `en` (English), `fr` (French), `es` (Spanish), `it` (Italian), `pt` (Portuguese)
-  - Germanic & Slavic: `de` (German), `ru` (Russian)
-- **Universal Fallback**: Any other language in the world immediately functions through `reference/source/generic.md` and `reference/target/generic.md`.
-- **Zero-Code Expansion**: To add specialized deep-tuning for any new language (e.g. Arabic `ar`, Swedish `sv`, Hindi `hi`), simply create `reference/source/{lang}.md` and `reference/target/{lang}.md` following the existing format. The skill will discover and apply them automatically without changing any code or scripts.
+### Stage 2: Adversarial Quality Review (`roles/reviewer.md`)
 
-## Rule Selection
+Dispatched as a **completely fresh subagent (clean context window)** with zero memory of the translator's thought process:
 
-Use source references to understand cross-line grammar, ellipsis, and source-specific meaning. Use target references to write natural, concise, singable output. Consult pair exceptions only for genuine bilateral pitfalls; they supplement rather than replace the other two files.
+1. **Operating Mandate**: Operates under the **Adversarial Falsification Protocol (证伪协议)** — hunting aggressively for errors rather than validating the draft.
+2. **Core Audit Targets**:
+   - **Dictionary First-Sense Traps (首选字面义陷阱)**: Catches idioms or polysemous phrases translated literally that contradict song context (e.g., 「もういいかい？」 as "藏好了吗" vs. cynical "够了吗").
+   - **Contextual Contradictions (语境冲突与因果断裂)**: Catches lines creating emotional or logical breaks with lines $N-2 \dots N+2$.
+   - **Persona & Pronoun Consistency**: Ensures voice stability and eliminates hallucinated subjects.
+   - **Red Line Adherence**: Checks character limits and ensures zero plot injection.
+3. **Output**: Structured Issue Directives categorized into `Critical Defects (Mandatory Fixes)` and `Stylistic Polish`.
 
-Never load obsolete direction files or invent pair-specific rules that are not required by the lyric at hand.
+### Stage 3: Arbitration, Polish & Final Integration (`roles/arbiter.md`)
 
-## Batch Mode (Directory & Multi-File Orchestration)
+Finalizes the translation and guarantees deterministic output:
 
-Automatically activate batch mode whenever the user requests translating an entire directory or folder (e.g., "翻译某个文件夹下的所有文件", "batch translate folder"), or when scanning a path reveals multiple lyrics files.
+1. **Arbitration**: Mandatorily adopts all confirmed critical defect fixes; arbitrates stylistic suggestions against the Song Persona.
+2. **Cadence Polish**: Enforces natural target breath groups (4–16 characters for Chinese) and eliminates translationese (`的`-chains, Europeanized passives).
+3. **Physical Write**: Commits revised lines back to `.tmp.txt`.
+4. **Deterministic Gate**: Runs `python scripts/lrc_merge.py <original.lrc> <translated.tmp.txt>` and verifies console outputs `[OK]`.
+   - **No-Read Verification Principle**: Once `lrc_merge.py` exits 0 with `[OK]`, timeline integrity, line-count parity, and metadata immunity are 100% mathematically proven. Never call file-reading tools on merged `.lrc` files.
 
-### 1. File Discovery & Concurrency Partitioning
+---
 
-1. Scan the target directory for all candidate lyrics files (`*.lrc`, `*.txt`, `*.md`), automatically excluding temporary files (`*.tmp.txt`, `.grammar-work`, etc.).
-2. Partition the discovered files into batches of up to 5 files each.
-3. Maintain up to 5 concurrent subagents (using `invoke_subagent`), with each subagent assigned one batch.
-4. Advance the batch process fully autonomously without requiring step-by-step user confirmations.
+## Multi-File Orchestration (Sliding-Window Pool)
 
-### 2. Core Execution Constraints for Subagents
+When translating an entire directory, folder, or multiple files, the parent agent acts as a **Sliding-Window Concurrency Pool Coordinator**:
 
-Every subagent dispatched for a batch must strictly follow these three rules:
+1. **Per-Song Isolation Rule**: Every song is an independent unit. Never mix multiple songs into a single agent's context window. This prevents cross-song style contamination and reviewer attention dilution.
+2. **Concurrency Cap**: Maintain a sliding window of **3–5 concurrent song pipelines**.
+3. **Queue Progression**:
+   - Discover all candidate lyrics files (`*.lrc`, `*.txt`, `*.md`), excluding temporary working files.
+   - Dispatch up to 3–5 songs into their respective 3-Stage Pipelines.
+   - As each song completes Stage 3 and passes `lrc_merge.py`, immediately pop the next queued song into the active pool.
+4. **Final Summary**: Once all queued songs complete, aggregate results into a final markdown delivery table showing each file, persona, lines translated, key corrections adopted, and `[OK]` merge status.
 
-1. **Mandatory Full Skill & Reference Execution**: Each subagent translating assigned files must first completely read and strictly execute `lyrics-translator`'s `SKILL.md` and the entire set of reference rules (`reference/common.md` semantic chunking, `reference/source/{source}.md`, `reference/target/{target}.md`, and `reference/pair-exceptions.md`). Cutting corners, omitting reference rules, or performing direct line-by-line literal translation is strictly forbidden.
-2. **Efficient Batching & No-Read Verification Principle (免读验证原则)**:
-   - Call `python <skill-root>/scripts/lrc_strip.py <file1> <file2>...` to strip timestamps in batch and create same-directory `.tmp.txt` working files.
-   - Translate lyrics in plain text directly within each `.tmp.txt` file without timestamp distractions.
-   - Call `python <skill-root>/scripts/lrc_merge.py <file1> <file2>...` to merge translations back into the original `.lrc` files and run deterministic timeline validation.
-   - **No-Read Verification**: `lrc_merge.py` performs rigorous deterministic bilingual line-count, timestamp, and metadata verification. As long as the console outputs `[OK]`, the merge is 100% verified. **Subagents and parent agents are strictly forbidden from calling file-reading tools (`read_file`, etc.) to re-read merged `.lrc` files**, saving massive context tokens and execution time.
-3. **Role Isolation & Autonomous Progression**:
-   - Subagents focus exclusively on their assigned lyric translations without reading global configurations, unrelated files, or large state files.
-   - Proceed fully autonomously through the batch without pausing for per-file user confirmation.
-
-### 3. Subagent Dispatch Prompt Template
-
-When dispatching subagents for batch translation, pass this standardized prompt:
-
-```text
-Read and follow <skill-root>\SKILL.md.
-You are assigned to translate the following lyrics files into <target language>:
-- <file1>
-- <file2>
-...
-
-Strict Execution Requirements:
-1. Mandatory Full Skill Execution: You must first completely read and strictly follow SKILL.md and its referenced rules (reference/common.md for semantic chunking, reference/source/<source>.md, reference/target/<target>.md, and reference/pair-exceptions.md). Never cut corners or translate line-by-line literally.
-2. Efficient Batching & No-Read Verification:
-   - Run: python <skill-root>\scripts\lrc_strip.py <file1> <file2> ...
-   - Translate pure lyrics in plain text within each .tmp.txt file.
-   - Run: python <skill-root>\scripts\lrc_merge.py <file1> <file2> ...
-   - No-Read Verification Principle: Once lrc_merge.py outputs [OK], the output is 100% verified. DO NOT call read_file or any inspection tools to re-read merged .lrc files.
-3. Role Isolation: Focus exclusively on your assigned batch of files. Do not inspect global state or unrelated project files. Report final status upon completion.
-```
-
-### 4. Batch Result Aggregation
-
-After all subagents report completion:
-
-1. Aggregate the results into a markdown summary table showing each file name, source language, line count, and merge verification status (`[OK]`).
-2. Offer the standard post-translation revision options to the user.
-
-## Post-Translation
-
-After completing the translation and delivering the file, offer the user a follow-up option:
-
-> Translation complete. To revise specific lines, reply with the line numbers or quote the lines you'd like changed. To polish the entire translation, reply "继续润色" or "refine".
-
-For **line-level revision**: re-read the surrounding 3–5 line context, apply the same source/target/pair rules, and replace only the specified lines. For **full polish**: re-run Steps 5–6 of common.md (Refine + Quality Check) on the existing output.
+---
 
 ## Commands
 
 ```powershell
-# Strip timestamps (single file, batch files, or stdout):
+# Strip timestamps to create same-directory .tmp.txt working files:
 python <skill-root>/scripts/lrc_strip.py <input.lrc> [<output.tmp.txt>]
 python <skill-root>/scripts/lrc_strip.py <input1.lrc> <input2.lrc> ...
-python <skill-root>/scripts/lrc_strip.py --print <input.lrc>
 
-# Merge translations back & verify deterministically (single or batch):
+# Merge translations back into .lrc & deterministically verify:
 python <skill-root>/scripts/lrc_merge.py <original.lrc> [<translated.tmp.txt>]
 python <skill-root>/scripts/lrc_merge.py <original1.lrc> <original2.lrc> ...
 ```

@@ -1,14 +1,14 @@
 ---
 name: sakurauta-lyrics-workflow
-description: Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation, grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered.
-version: 2.2.2
+description: Create bilingual LRC translations and SakuraUta Schema v2 grammar-analysis sidecars. Coordinates fresh child roles for translation (Adversarial 3-Stage Pipeline: Translator → Reviewer in clean context → Arbiter/Merge), grammar analysis, and independent semantic audit; deterministic scripts freeze and finalize the contract. Automatically activates batch workflow when a directory or multiple LRC files are specified or discovered.
+version: 2.3.0
 ---
 
 # SakuraUta Lyrics Workflow v2
 
-The parent coordinates three independent child roles. It does not translate, invent grammar analysis, or self-audit semantics inline.
+The parent coordinates independent child roles. It does not translate, invent grammar analysis, or self-audit semantics inline.
 
-1. Translation child: reads `lyrics-translator` directly.
+1. Translation Stage (when translation is required): coordinates the `lyrics-translator` Adversarial 3-Stage Pipeline (Stage 1 Translator child → Stage 2 Adversarial Reviewer child in fresh context → Stage 3 Arbiter/Finalizer) to eliminate confirmation bias and idiom traps before educational analysis begins.
 2. Grammar child: authors only the v2 semantic draft. A deterministic tool writes its repetition-candidate list, and the parent freezes the candidate.
 3. Semantic-audit child: a different fresh transcript that reviews the frozen candidate and writes only the audit report.
 
@@ -54,39 +54,68 @@ Never fall back to inline translation, grammar analysis, or self-audit.
 
 ## Phase 1: Translate and Freeze
 
-1. Dispatch a fresh translation child only when `<song.lrc>` is not already bilingual and accepted:
+Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is not already bilingual and accepted:
 
-```text
-Read and follow <skills>\lyrics-translator\SKILL.md.
-Translate <song.lrc> into <target learner language>.
-Do not produce grammar JSON.
-```
+1. **Step 1: Strip Timestamps**:
 
-The translation child must strictly follow `lyrics-translator`: run `lrc_strip.py` to produce a timestamp-free plain text working file, translate in plain text without timestamp distraction, and run `lrc_merge.py` to merge translations into `<song.lrc>`. Do not add a translation wrapper Skill, do not expose `<workdir>` or projection internals to the translation child, and do not restate the translator's quality rules.
+   ```powershell
+   python <translator-skill>\scripts\lrc_strip.py "<song.lrc>"
+   ```
 
-2. Create the source projection:
+   This generates `<song>.tmp.txt` in the same directory.
 
-```powershell
-python <grammar-skill>\scripts\project_source.py "<song.lrc>" `
-  --song-id "<songId>"
-```
+2. **Step 2: Dispatch Translator Child (Stage 1)**:
 
-`project_source.py` canonicalizes the source rows (automatically ignoring interleaved translation rows if present) and writes `<workdir>\source-projection.json`.
+   ```text
+   Read and follow <skills>\lyrics-translator\roles\translator.md and its referenced linguistic profiles in <skills>\lyrics-translator\reference\.
+   Translate the working file <song>.tmp.txt into <target learner language>.
+   Output the Song Persona and Theme handover memo upon completion.
+   Do not produce grammar JSON.
+   ```
 
-3. After the user accepts the translation, freeze it:
+3. **Step 3: Dispatch Adversarial Reviewer Child (Stage 2 — Clean Isolated Context)**: Dispatch a **separate, fresh subagent** with zero memory of the translator's thought process:
 
-```powershell
-python <grammar-skill>\scripts\verify_translation.py `
-  "<workdir>\source-projection.json" `
-  "<song.lrc>" `
-  --workdir "<workdir>"
-```
+   ```text
+   Read and follow <skills>\lyrics-translator\roles\reviewer.md.
+   Audit the draft translation in <song>.tmp.txt against the original source lyrics and the translator's Song Persona handover memo.
+   Execute the Adversarial Falsification Protocol:
+   - Identify dictionary first-sense traps (e.g., polysemous idioms or rhetorical phrases translated literally).
+   - Identify contextual contradictions (emotional or causal breaks with surrounding lines).
+   - Identify register collapse or narrative persona drift.
+   - Enforce red lines (no plot injection, length within cap, metadata immunity).
+   Output your structured critique report according to roles\reviewer.md.
+   ```
 
-This verifies the bilingual handoff in `<song.lrc>` against the source projection, freezes a snapshot to `<workdir>\translated.lrc`, and writes `translation-manifest.json`. (If the accepted translation resides in an alternate file, pass that path as `<accepted-lrc>` instead). The parent owns acceptance. Do not proceed if freezing fails. Do not edit `translated.lrc` after this point. The freeze is an audit snapshot; the production JSON remains self-contained and does not require recipients to ship `.grammar-work`.
+4. **Step 4: Arbiter & Deterministic Merge (Stage 3)**:
+   - Mandatorily adopt all critical defect fixes identified by the Reviewer child; arbitrate stylistic suggestions against the Song Persona.
+   - Apply polished lines to `<song>.tmp.txt`.
+   - Run the deterministic merge script:
+     ```powershell
+     python <translator-skill>\scripts\lrc_merge.py "<song.lrc>" "<song>.tmp.txt"
+     ```
+   - Verify the console outputs `[OK]`. (No-Read Verification Principle: do NOT manually re-read the merged `.lrc` file; exit code 0 is authoritative).
+
+5. **Step 5: Create Source Projection**:
+
+   ```powershell
+   python <grammar-skill>\scripts\project_source.py "<song.lrc>" `
+     --song-id "<songId>"
+   ```
+
+   `project_source.py` canonicalizes the source rows (automatically ignoring interleaved translation rows if present) and writes `<workdir>\source-projection.json`.
+
+6. **Step 6: Freeze Accepted Translation**: After the user accepts the translation, freeze it:
+   ```powershell
+   python <grammar-skill>\scripts\verify_translation.py `
+     "<workdir>\source-projection.json" `
+     "<song.lrc>" `
+     --workdir "<workdir>"
+   ```
+   This verifies the bilingual handoff in `<song.lrc>` against the source projection, freezes a snapshot to `<workdir>\translated.lrc`, and writes `translation-manifest.json`. (If the accepted translation resides in an alternate file, pass that path as `<accepted-lrc>` instead). The parent owns acceptance. Do not proceed if freezing fails. Do not edit `translated.lrc` after this point. The freeze is an audit snapshot; the production JSON remains self-contained and does not require recipients to ship `.grammar-work`.
 
 ## Phase 2: Fresh Grammar Analysis
 
-4. Dispatch a grammar child different from the parent:
+7. Dispatch a grammar child different from the parent:
 
 ```text
 Read and follow <grammar-skill>\SKILL.md and <grammar-skill>\references\draft-contract.md.
@@ -103,7 +132,7 @@ STRICT RULES:
 - Write only <workdir>\semantic-draft.json. Do not write isolation proofs or <song>.json, and do not alter the frozen translation.
 ```
 
-5. After the grammar child returns, record the actual grammar-child identity:
+8. After the grammar child returns, record the actual grammar-child identity:
 
 ```powershell
 python <grammar-skill>\scripts\record_isolation.py "<workdir>" `
@@ -113,59 +142,47 @@ python <grammar-skill>\scripts\record_isolation.py "<workdir>" `
   --replace
 ```
 
-Never invent an ID. Explicit file paths remain supported.
-
-6. Deterministically freeze the candidate:
+9. Prepare the repetition-candidate list deterministically:
 
 ```powershell
 python <grammar-skill>\scripts\prepare.py "<song.lrc>" `
-  --projection "<workdir>\source-projection.json" `
   --workdir "<workdir>" `
   --learner-language "<target>"
 ```
 
-This validates projection/freeze identity, Schema v2, exact repetition completion, canonical source normalization, meaning coverage, boundary punctuation, and shared occurrence mappings. It writes:
+10. Freeze the candidate:
 
-- `analysis-candidate.json`;
-- `analysis-candidate.sha256`;
-- `repetition-candidates.json`;
-- `validation-report.json`.
+```powershell
+python <grammar-skill>\scripts\freeze_candidate.py "<workdir>"
+```
 
-If preparation fails, rerun grammar analysis in a new fresh transcript. Do not patch the candidate or translation.
+Do not edit `analysis-candidate.json` or its repetitions block after freezing.
 
 ## Phase 3: Independent Semantic Audit
 
-7. Dispatch a different fresh child:
+11. Dispatch a semantic-audit child different from both the parent and the grammar child:
 
 ```text
-Read and follow <grammar-skill>\references\semantic-audit-contract.md.
-Step 1: Run audit_summary.py to inspect the candidate against frozen translations and emit the pre-populated audit template:
-  python scripts\audit_summary.py "<workdir>" --emit-template "<workdir>\semantic-audit.json" --learner-language "<target>"
-Step 2: Check the printed summary for meaning fidelity, unsupported additions, translation mismatches, or coverage gaps.
-  - If all candidate blocks and meaning units faithfully reflect the translation: the pre-populated template is already set to status "pass".
-  - If there are errors/warnings: edit <workdir>\semantic-audit.json to set status "fail" and add specific finding objects to findings.
-Step 3: Self-verify the report before returning:
-  python scripts\validate_audit.py "<workdir>\analysis-candidate.json" --candidate-hash "<workdir>\analysis-candidate.sha256" "<workdir>\semantic-audit.json" --learner-language "<target>"
-STRICT RULES:
-- Do not inspect or read internal scripts (v2lib.py, sidecarlib.py, etc.) or write scratch Python scripts.
-- Do not dump full LRC or JSON files into context.
-- Write only <workdir>\semantic-audit.json. Do not edit draft, candidate, hash, translation, or final sidecar.
-- Do not write isolation-semantic-audit.json (the parent records isolation proofs).
+Read and follow <grammar-skill>\SKILL.md and <grammar-skill>\references\semantic-audit-contract.md.
+You are the independent semantic auditor. You must NOT alter the candidate or translation.
+1. Run audit_draft.py to generate the deterministic baseline audit:
+   python scripts\audit_draft.py "<workdir>\analysis-candidate.json" --workdir "<workdir>" --learner-language "<target>"
+2. Review the output against the frozen translation and candidate:
+   - Check accuracy of line and phrase meanings against the frozen translation.
+   - Verify educational value of selected grammar points and expressions.
+   - Confirm all issues have specific fixes or rationale.
+3. Ensure semantic-audit.json has status: "pass". If issues are found, document them accurately.
+4. Run validate_audit.py to ensure your audit report conforms to schema:
+   python scripts\validate_audit.py "<workdir>\semantic-audit.json" --workdir "<workdir>"
 ```
 
-The audit must review every candidate block and meaning-unit ID. It must reject unsupported additions, translation mismatches, shared semantic drift, coverage gaps, and missing source evidence.
-
-8. Validate the audit report:
+12. After the semantic-audit child completes, verify the audit passes:
 
 ```powershell
-python <grammar-skill>\scripts\validate_audit.py `
-  "<workdir>\analysis-candidate.json" `
-  --candidate-hash "<workdir>\analysis-candidate.sha256" `
-  --learner-language "<target>" `
-  "<workdir>\semantic-audit.json"
+python <grammar-skill>\scripts\verify_audit.py "<workdir>"
 ```
 
-9. After validating the report, record the actual audit-child identity:
+13. Record the semantic-audit child identity:
 
 ```powershell
 python <grammar-skill>\scripts\record_isolation.py "<workdir>" `
@@ -175,13 +192,9 @@ python <grammar-skill>\scripts\record_isolation.py "<workdir>" `
   --replace
 ```
 
-This ID must differ from `<actual-grammar-child-id>`. A same-child audit is always rejected. Explicit file paths remain supported.
+## Phase 4: Finalize and Validate
 
-If the audit fails, do not finalize. Rerun analysis and audit in fresh transcripts after resolving the finding, or ask the user to resolve the semantic dispute.
-
-## Phase 4: Finalize and Verify
-
-10. Run the deterministic finalizer:
+14. Run the deterministic finalizer:
 
 ```powershell
 python <grammar-skill>\scripts\finalize.py "<song.lrc>" `
@@ -201,7 +214,7 @@ The finalizer requires:
 
 Only after every check does it atomically write the sibling JSON.
 
-11. Verify the result and complete chain:
+15. Verify the result and complete chain:
 
 ```powershell
 python <grammar-skill>\scripts\validate_all.py `
@@ -219,17 +232,12 @@ Automatically activate batch execution mode whenever the user requests translati
 
 ### 1. Batch Translation Orchestration (Phase 1)
 
-1. Scan the target directory and collect all candidate `.lrc` files, excluding temporary files and `.grammar-work` directories.
-2. Partition the files into batches of up to 5 files each, maintaining up to 5 concurrent translation subagents (`invoke_subagent`).
-3. Each translation subagent receives the standardized prompt enforcing the three core constraints:
-   - **Mandatory Full Skill Execution**: The subagent must first completely read and strictly follow `lyrics-translator`'s `SKILL.md` and all referenced rules (`reference/common.md` semantic chunking, `source/`, `target/`, and `pair-exceptions.md`). Cutting corners or literal line-by-line direct translation is strictly forbidden.
-   - **Efficient Batching & No-Read Verification Principle (免读验证原则)**:
-     - Run `python <translator-skill>\scripts\lrc_strip.py <file1> <file2>...` to batch-strip timestamps into `.tmp.txt` working files.
-     - Translate pure lyrics in plain text within each `.tmp.txt` file without timestamp distractions.
-     - Run `python <translator-skill>\scripts\lrc_merge.py <file1> <file2>...` to batch-merge and deterministically verify timeline alignment.
-     - **No-Read Verification Principle**: `lrc_merge.py` performs strict deterministic line-count, timestamp, and metadata verification. Output of `[OK]` represents 100% verification success. **Subagents and parent agents are strictly forbidden from calling file-reading tools (`read_file`, etc.) to re-read merged `.lrc` files**, saving massive context tokens.
-   - **Role Isolation & Autonomous Progression**: Subagents focus solely on translating assigned files without inspecting global configs or unrelated files. The parent coordinates the batch fully autonomously without requiring per-file user confirmation.
-4. After all translation subagents finish, execute deterministic batch projection and batch freezing:
+1. Scan the target directory and collect all candidate `.lrc` files, excluding temporary files and `.grammar-work` directories. Identify files that are already bilingual vs. files requiring translation.
+2. For files requiring translation, operate via the **Sliding-Window Concurrency Pool (Worker Pool)**:
+   - Maintain up to 3–4 concurrent song translation pipelines.
+   - For each song, dispatch the dedicated Stage 1 Translator Child, followed by the Stage 2 Adversarial Reviewer Child in a fresh context, and finalize with Stage 3 Arbiter merge via `lrc_merge.py`.
+   - Never bundle multiple songs into a single child prompt — enforce per-song context isolation to eliminate style bleeding and reviewer attention dilution.
+3. After all translations pass `lrc_merge.py` with `[OK]`, execute deterministic batch projection and batch freezing:
 
 ```powershell
 python <grammar-skill>\scripts\project_source.py "<song1.lrc>" "<song2.lrc>" ...

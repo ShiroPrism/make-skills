@@ -42,201 +42,43 @@ When invoked frequently, apply these 8 rules first:
 
 ---
 
-## Execution Workflow
+## Pipeline Architecture: The 3-Stage Quality Protocol
 
-### Step 0 — Tool Discipline (Mandatory)
-
-**Read before write, always.**
-
-- **LRC Mode**: the working file is the `.tmp.txt` produced by `lrc_strip.py` — call `read_file` on **that file**, not the original `.lrc`.
-- **Plain Mode**: call `read_file` on the `.txt` / `.md` file directly.
-- Complete all analysis in memory, then write edits in a single pass using `replace_string_in_file` or `edit_file`.
-- Do **not** alternate between reads and writes — this causes line-offset drift and translation stacking.
-- For files over 200 lines: two `read_file` calls are acceptable, but merge the full analysis in memory before writing.
-
-### Step 1 — Survey and Plan
-
-- [ ] Scan the full file. Label each line as: source lyric / target-language line / metadata / special (blank / SFX / filler / production credit).
-- [ ] Determine song subject, emotional tone, and narrative POV (first person, third person, duet, multi-voice).
-- [ ] For duets/multi-voice: build a speaker map using these steps:
-  1. Identify distinct voices from metadata cues (e.g., `[Singer A]`), color brackets, or contextual shifts in pronouns/register.
-  2. Assign each section to a speaker. If ambiguous, mark as "shared" and resolve from surrounding lines.
-  3. Maintain voice-differentiated register in translation: if Speaker A uses casual speech and Speaker B is formal, their translations must reflect this even when the source language doesn't mark it overtly (common in EN → JA/KO).
-  4. For pronoun crossover (A refers to B, B refers to A with same word like "you"): ensure the translations use consistent, distinct renderings for each speaker's "you."
-  5. Chorus/unison sections: use a neutral shared register unless the song clearly assigns different lyrics to simultaneous voices (in which case translate each independently).
-- [ ] Lock in chorus, hook, and core-imagery translations to use consistently throughout.
-- [ ] Flag long-sentence splits, chained grammar, and code-mixed passages. For lines with existing translations, decide: keep, overwrite, or skip (never stack).
-- [ ] **Multi-Source-Language Detection** — Check whether the file contains blocks of lyrics in a language different from the primary source language. This is _not_ the same as single-line code-mixing (e.g., a Japanese line with a few English words); this is **block-level language switching** where consecutive lines are entirely in a different language.
-
-  **How to detect**: While labeling lines, note any run of 2+ consecutive source-lyric lines whose script/language differs from the primary source. Common patterns:
-  - Japanese song with an English bridge or rap section
-  - Korean song with Japanese verses
-  - English song with a full Chinese chorus
-
-  **What to do when detected**:
-  1. Identify each secondary source language present (there may be more than one).
-  2. Load `reference/source/{secondary}.md` for each secondary language found. Also load the corresponding `reference/pair-exceptions.md` entry for `{secondary}→{target}` if one exists.
-  3. Tag each source-lyric line in your internal survey with its actual language (e.g., `JA`, `EN`), not just the primary.
-  4. During Steps 2–4 (Key Phrase Resolution, Semantic Chunking, Translation), apply the source-language rules that match each line's tagged language — not the primary source rules uniformly.
-
-  **What does NOT trigger this**: Filler lines that happen to be in another language (e.g., `Oh oh oh`, `La la la`) are already handled by Filler Line Passthrough — they don't count as a secondary source language block. Single-line code-mixed lines (Japanese sentence with scattered English words) are already handled by the existing code-mixed rule — use the primary source rules and translate the overall meaning.
-
-### Step 2 — Key Phrase Resolution (In-Memory)
-
-While surveying, collect every phrase whose meaning is not transparent from its characters alone. Resolve each to its true contextual meaning and lock a rendering BEFORE any translation is drafted. This table lives in memory only — never write it to a file, and never interleave extra reads/writes to build it.
-
-**Deep-dive triggers (any phrase matching one of these must enter the table):**
-
-| Trigger | What to check | Example |
-| :-- | :-- | :-- |
-| Idiom / proverb, truncated or altered | Identify the full underlying proverb; render its intent in this context | 酸いも甘いも… ← 酸いも甘いも噛み分ける |
-| Katakana loanword (or other script borrowing) | Render the original foreign word's semantics, never the sound or glyph | ランデブー → a date / tryst |
-| Pun / homophone wordplay | If untranslatable, fuse both senses into one rendering | 愛(あい) / 相(あい) overlapping |
-| Coined word / title wordplay | Decompose into parts; keep the wordplay visible in the target | 心予報 = heart + weather forecast |
-| False-friend kanji (see pair-exceptions) | Verify meaning in the source language, never by glyph shape | 余所見, 心遊ばせ |
-| Connotation-sensitive word | Check the candidate rendering's emotional color against the source | 浮つく = giddy/sweet, NOT restless |
-| Ambiguous grammatical subject | Resolve what governs what before choosing an imperative or descriptive reading | 心遊ばせ — the heart plays, not the listener |
-
-**In-memory table format (held alongside the block map until the final check):**
-
-| Phrase | Resolved meaning | Locked rendering |
-| :-- | :-- | :-- |
-| 酸いも甘いもわからないの | truncation of the kotowaza "to know bitter from sweet" → too smitten to tell love's flavors | 连酸甜都分不清 |
-| 浮つく | giddy, sweetly fluttery (positive) | 雀跃的 |
-
-Rules:
-
-- Locked renderings are binding for Step 4 (draft) and re-verified in Steps 5 and 6.
-- Never invent a matching second half to "balance" a resolved phrase.
-- When a phrase cannot be resolved with confidence, prefer its idiomatic meaning over a character-by-character reading, and prefer under-specification over invention.
-- Ambiguous subjects that need block context may be back-filled after Step 3 (semantic chunking) completes — update the table before drafting.
-
-### Step 3 — Semantic Chunking (Mandatory)
-
-> **This is a hard gate in the pipeline. Step 4 (translation) must not begin until semantic block construction is complete and the Step 2 key-phrase table has no unresolved entries.**
-
-**Pipeline order:**
+Translation quality is guaranteed through strict separation of responsibilities across three dedicated roles. The same agent context must NEVER perform both translation and final quality review.
 
 ```
-Parse LRC → Build semantic blocks → Block-level comprehension → Map output back to timeline (one line per source line)
+Stage 1: Initial Translation (roles/translator.md)
+  ↓ (Handover: Draft .tmp.txt + Song Persona Memo)
+Stage 2: Adversarial Quality Review (roles/reviewer.md — Clean Isolated Context)
+  ↓ (Issue Directives: Mandatory Fixes & Contextual Contradiction Flags)
+Stage 3: Arbiter & Finalizer (roles/arbiter.md)
+  ↓ (Arbitration + Rhythm Polish)
+Physical Integration: lrc_merge.py [OK]
 ```
 
-**Mandatory block construction (must not be skipped):**
+### Stage 1 Standards — Initial Translation (Translator)
 
-Before writing any translation, construct the internal block map in memory:
+- Complete full survey before drafting; define the 1–2 sentence Song Persona.
+- Construct semantic blocks (Semantic Chunking) — never translate chained modifiers or incomplete predicates in isolation.
+- Lock key phrases, proverbs, and katakana loanwords contextually before drafting.
+- Output line-by-line draft directly to `.tmp.txt`.
 
-```
-Block 1: [lines A, B]   — chained (te-form / enjambment / modifier chain)
-Block 2: [line C]       — self-contained
-Block 3: [lines D, E]   — chained (incomplete predicate / verb-ending stack)
-```
+### Stage 2 Standards — Adversarial Review (Reviewer)
 
-→ Every source line must be assigned to exactly one block. → **Block construction incomplete → do not proceed to Step 4.**
+- Runs in a completely fresh, isolated context (Zero-Memory Principle).
+- Executes the Adversarial Falsification Protocol:
+  - **Dictionary First-Sense Traps**: flags phrases translated only by literal dictionary definition #1 that clash with song context (e.g., 「もういいかい？」 as "藏好了吗" vs. cynical "够了吗").
+  - **Contextual Contradictions**: flags lines creating sudden, unmotivated emotional or causal breaks with surrounding lines.
+  - **Narrative Persona & Pronoun Drift**: verifies speaker identity and consistency.
+  - **Red Line Compliance**: verifies no plot injection, length within cap, and metadata preservation.
+- Outputs structured Issue Directives.
 
-**Procedure:**
+### Stage 3 Standards — Arbiter & Finalizer (Arbiter)
 
-1. Detect source language and load block-detection signals from `reference/source/{source}.md` (or `reference/source/generic.md` if unprofiled).
-2. Scan each source line for incomplete-sentence signals (see table below).
-3. Group consecutive semantically connected lines into a **semantic block**. A block may be 1 line (self-contained) or multiple lines (chained/dependent).
-4. **Translate at block level**: Derive meaning, pronouns, and register from the full block, then output one translation per source line.
-   - Output format is unchanged: each source line gets exactly one same-timestamp translation line.
-   - The _meaning_ used to write that translation comes from the whole block — not the isolated line.
-5. **Allow non-closing expressions**: A non-closing source line may produce a non-closing translation — do **not** force it into a standalone complete sentence.
-
-**Universal incomplete-sentence signals:**
-
-| Signal type | Description |
-| :-- | :-- |
-| No predicate closure | Line ends without a terminating verb or complete predicate |
-| Modifier without head | Line is a modifier whose head noun/verb is on the next line |
-| Connective dependency | Line begins with a connective that requires the previous line |
-| Unresolved reference | Pronoun or demonstrative on this line resolves only on the next line |
-
----
-
-### Semantic Integrity Guard
-
-If **any** of the following is detected, per-line independent translation is **prohibited**:
-
-| Trigger | Condition |
-| :-- | :-- |
-| Consecutive incomplete lines | Two or more consecutive lines with no terminal predicate |
-| Consecutive modifier chains | Two or more consecutive lines ending with te-form / `〜ように` / `〜ながら` / enjambment / verb-ending stack |
-| Cross-line semantic dependency | Current line's meaning requires the next line to resolve |
-
-→ ❌ **Independent per-line translation is forbidden** → ✅ **Merge into one semantic block, then translate**
-
-Violating this guard is a critical translation error.
-
-**Wrong (violates Semantic Integrity Guard):**
-
-```lrc
-[00:01]沈むように       →  像沉入水中一般
-[00:02]溶けてゆくように  →  像要融化消失那样
-```
-
-_Both lines forced into standalone similes — redundant, stilted, and a semantic integrity violation._
-
-**Correct (block-level comprehension, then per-line output):**
-
-```lrc
-[00:01]沈むように       →  如同在沉沦
-[00:02]溶けてゆくように  →  又如同在消融
-```
-
-> Language-specific block-detection signals (e.g. JA te-form chains, EN/FR enjambment, DE verb brackets, ZH poetic cuts, KO verb-ending stacks, ES/IT sinalefa/elision) are defined in `reference/source/{source}.md` (or `reference/source/generic.md`).
-
-### Step 4 — Translate (First Draft)
-
-- [ ] Process each source line: insert one same-timestamp translation line directly below.
-- [ ] Default to short and direct; avoid stacked modifiers and added plot points.
-- [ ] Split lines at natural breath points; keep each line self-contained. Do not front-load the next line's conclusion.
-- [ ] Code-mixed lines: preserve the source line as-is; translate the overall meaning naturally in the target line.
-- [ ] Filler vocalization lines / pure `♪` lines → pass through unchanged.
-
-**Translation behavior constraints:**
-
-- ❌ Avoid over-explanation, semantic completion, and literary expansion beyond what the source contains.
-- ❌ Do not add cause-and-effect structure where the source only implies it.
-- ❌ Do not transform a non-closing expression into a conclusion sentence.
-- ✅ Prioritize: direct expression, action-driven phrasing, singability.
-
-### Step 5 — Refine (Critique Pass)
-
-Re-read the draft as a critic, not as its author. For each semantic block, run all three diagnostic dimensions before accepting any line:
-
-| Dimension | Check for | Failure example (JA → ZH) |
-| :-- | :-- | :-- |
-| **Accuracy** | Invented additions; dropped meaning; wrong subject; idiom resolved literally | きっと君の前では迷子 → 迷路的小孩 ("小孩/child" invented; 迷子 here means lost, with no noun) |
-| **Native voice** | Stiff or bookish register; translationese — apply the checklist in `reference/target/{target}.md` | 冷静沈着では どう頑張ったって無い → 无论怎样努力也无济于事 (bookish) — natural: 冷静沉着什么的 无论怎么努力都做不到 |
-| **Connotation** | Emotional color of the rendering must match the source | 浮つく → 浮躁 (negative restlessness; source is sweet giddiness) → 雀跃 |
-
-- [ ] Every locked rendering from the Step 2 table was used, unchanged.
-- [ ] Chorus / hook / core-imagery translations unified across the whole file.
-- [ ] Verify narrative POV and pronoun consistency throughout.
-- [ ] Verify culture-specific terms (proper nouns, cultural references) are translated by meaning, not transliterated, where appropriate.
-- [ ] **Over-correction guard**: revise only lines with a diagnosed defect. Do not flatten vivid, correct lines into literalness out of caution.
-
-### Step 6 — Quality Check
-
-- [ ] Source and translation lines strictly alternate.
-- [ ] No missing lines, no modified metadata, no modified target-language lines, no stacked third lines.
-- [ ] No timestamp tokens in any translation line.
-- [ ] All Step 2 locked key-phrase renderings appear consistently (title, hooks, choruses).
-- [ ] **Spot-check**: Read one line aloud from each of intro / verse / chorus. Confirm: meaning is clear, singable in one breath, contains no plot points not in the source.
-
-### Step 7 — Post-Processing (LRC Mode only)
-
-After the quality check passes:
-
-1. Run `lrc_merge.py` to inject translations back into the original `.lrc`:
-   ```powershell
-   python <skill-root>/scripts/lrc_merge.py <original.lrc> [<input.tmp.txt>]
-   # Batch merge is also supported:
-   python <skill-root>/scripts/lrc_merge.py <file1.lrc> <file2.lrc> ...
-   ```
-2. Confirm the script reports `[OK]` status. The script deterministically verifies timestamp syntax, matching timestamps between interleaved pairs, metadata immunity, and cleans up the temporary file automatically.
-3. Do NOT manually re-read the merged `.lrc` file — the script's exit code 0 and `[OK]` output provide complete proof of structural validity, saving context tokens and avoiding redundant tool calls.
+- **Mandatory Adoption**: All confirmed critical defects (contextual contradictions, dictionary traps, mistranslations) must be corrected.
+- **Persona Arbitration**: Stylistic polish suggestions are accepted or rejected based on alignment with the Song Persona.
+- **Rhythm Polish**: Checks breath groups, cadence (4–16 Chinese characters), and removes translationese.
+- **Deterministic Gate**: Writes final `.tmp.txt` and executes `lrc_merge.py` for timestamp and metadata integrity.
 
 ---
 
