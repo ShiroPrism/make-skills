@@ -64,3 +64,5 @@ Upon completing the working file, compile a structured handover memo for the Rev
 - **Key Metaphors & Locked Choices**: <Key terms, recurring hooks, or double-meanings resolved>
 - **Attention Points for Reviewer**: <Specific lines where ambiguity or multiple interpretations exist>
 ```
+
+> [!IMPORTANT] **Token Conservation Principle (禁止回传全量歌词)**: Do NOT dump or print the full translated lyrics in your response. The working file on disk (`.tmp.txt`) is the authoritative artifact. Output only the Handover Memo to prevent inflating the parent coordinator's context window.

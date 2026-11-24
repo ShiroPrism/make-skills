@@ -33,7 +33,7 @@ Perform a final rhythm and singability check on the revised text:
 
 ### Step 3: Physical Write & Deterministic Gate
 
-1. Write the final polished translation directly back into the `.tmp.txt` working file, ensuring strict line-by-line alternation:
+1. Write the final polished translation directly back into the `.tmp.txt` working file in a single write pass (avoiding sequential line-by-line edit turns), ensuring strict line-by-line alternation:
    - Source line 1
    - Translated line 1
    - Source line 2

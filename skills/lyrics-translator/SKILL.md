@@ -57,7 +57,7 @@ Dispatched to translate the raw lyrics stripped by `lrc_strip.py`:
    - `reference/target/{target}.md`: Target breath units (4–16 characters for Chinese), register rules.
    - `reference/pair-exceptions.md`: False-friend kanji/cognates.
 3. **Semantic Chunking & Drafting**: Groups dependent clauses into semantic blocks; writes initial translation draft directly into `.tmp.txt`.
-4. **Handover**: Outputs the Song Persona memo and flags potential ambiguities for the Reviewer.
+4. **Handover**: Outputs the Song Persona memo and flags potential ambiguities for the Reviewer. Do not dump or print full translated lyrics in chat messages (the disk file is authoritative).
 
 ### Stage 2: Adversarial Quality Review (`roles/reviewer.md`)
 
@@ -77,7 +77,7 @@ Finalizes the translation and guarantees deterministic output:
 
 1. **Arbitration**: Mandatorily adopts all confirmed critical defect fixes; arbitrates stylistic suggestions against the Song Persona.
 2. **Cadence Polish**: Enforces natural target breath groups (4–16 characters for Chinese) and eliminates translationese (`的`-chains, Europeanized passives).
-3. **Physical Write**: Commits revised lines back to `.tmp.txt`.
+3. **Physical Write**: Commits revised lines back to `.tmp.txt` in a single write pass rather than multi-turn line edits.
 4. **Deterministic Gate**: Runs `python scripts/lrc_merge.py <original.lrc> <translated.tmp.txt>` and verifies console outputs `[OK]`.
    - **No-Read Verification Principle**: Once `lrc_merge.py` exits 0 with `[OK]`, timeline integrity, line-count parity, and metadata immunity are 100% mathematically proven. Never call file-reading tools on merged `.lrc` files.
 

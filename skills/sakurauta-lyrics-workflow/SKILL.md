@@ -63,14 +63,15 @@ Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is n
    python <translator-skill>\scripts\lrc_strip.py "<song.lrc>"
    ```
 
-   This generates `<song>.tmp.txt` in the same directory.
+   This generates `<song>.tmp.txt` in the same directory. No-Read Principle applies: the parent does not need to read `<song>.tmp.txt` before dispatching Stage 1; exit code 0 is authoritative.
 
 2. **Step 2: Dispatch Translator Child (Stage 1)**:
 
    ```text
    Read and follow <skills>\lyrics-translator\roles\translator.md and its referenced linguistic profiles in <skills>\lyrics-translator\reference\.
    Translate the working file <song>.tmp.txt into <target learner language>.
-   Output the Song Persona and Theme handover memo upon completion.
+   Output ONLY the Song Persona and Theme handover memo upon completion.
+   Do NOT dump or print the full translated lyrics in your response (the disk file is authoritative).
    Do not produce grammar JSON.
    ```
 
@@ -89,7 +90,7 @@ Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is n
 
 4. **Step 4: Arbiter & Deterministic Merge (Stage 3)**:
    - Mandatorily adopt all critical defect fixes identified by the Reviewer child; arbitrate stylistic suggestions against the Song Persona.
-   - Apply polished lines to `<song>.tmp.txt`.
+   - Apply polished lines to `<song>.tmp.txt` in a single write pass or script execution (avoid multi-turn single-line edit calls).
    - Run the deterministic merge script:
      ```powershell
      python <translator-skill>\scripts\lrc_merge.py "<song.lrc>" "<song>.tmp.txt"
@@ -143,21 +144,16 @@ python <grammar-skill>\scripts\record_isolation.py "<workdir>" `
   --replace
 ```
 
-9. Prepare the repetition-candidate list deterministically:
+9. Prepare and freeze the repetition-candidate list deterministically:
 
 ```powershell
 python <grammar-skill>\scripts\prepare.py "<song.lrc>" `
+  --projection "<workdir>\source-projection.json" `
   --workdir "<workdir>" `
   --learner-language "<target>"
 ```
 
-10. Freeze the candidate:
-
-```powershell
-python <grammar-skill>\scripts\freeze_candidate.py "<workdir>"
-```
-
-Do not edit `analysis-candidate.json` or its repetitions block after freezing.
+`prepare.py` validates Schema v2 conformance, repetition discovery/completion, and writes `<workdir>\analysis-candidate.json` along with its cryptographic hash `<workdir>\analysis-candidate.sha256`. Do not edit `analysis-candidate.json` or its repetitions block after freezing.
 
 ## Phase 3: Independent Semantic Audit
 
@@ -166,21 +162,24 @@ Do not edit `analysis-candidate.json` or its repetitions block after freezing.
 ```text
 Read and follow <grammar-skill>\SKILL.md and <grammar-skill>\references\semantic-audit-contract.md.
 You are the independent semantic auditor. You must NOT alter the candidate or translation.
-1. Run audit_draft.py to generate the deterministic baseline audit:
-   python scripts\audit_draft.py "<workdir>\analysis-candidate.json" --workdir "<workdir>" --learner-language "<target>"
-2. Review the output against the frozen translation and candidate:
+1. Run audit_summary.py to inspect the candidate against frozen translations and pre-populate the audit template:
+   python -X utf8 scripts\audit_summary.py "<workdir>" --emit-template "<workdir>\semantic-audit.json" --learner-language "<target>" --replace
+2. Review the 1-page alignment table against the frozen translation and candidate:
    - Check accuracy of line and phrase meanings against the frozen translation.
    - Verify educational value of selected grammar points and expressions.
-   - Confirm all issues have specific fixes or rationale.
-3. Ensure semantic-audit.json has status: "pass". If issues are found, document them accurately.
-4. Run validate_audit.py to ensure your audit report conforms to schema:
-   python scripts\validate_audit.py "<workdir>\semantic-audit.json" --workdir "<workdir>"
+   - If findings exist, document them accurately in semantic-audit.json.
+3. Run validate_audit.py to self-verify your audit report conforms to schema:
+   python -X utf8 scripts\validate_audit.py "<workdir>\analysis-candidate.json" --candidate-hash "<workdir>\analysis-candidate.sha256" --learner-language "<target>" "<workdir>\semantic-audit.json"
 ```
 
 12. After the semantic-audit child completes, verify the audit passes:
 
 ```powershell
-python <grammar-skill>\scripts\verify_audit.py "<workdir>"
+python <grammar-skill>\scripts\validate_audit.py `
+  "<workdir>\analysis-candidate.json" `
+  --candidate-hash "<workdir>\analysis-candidate.sha256" `
+  --learner-language "<target>" `
+  "<workdir>\semantic-audit.json"
 ```
 
 13. Record the semantic-audit child identity:
