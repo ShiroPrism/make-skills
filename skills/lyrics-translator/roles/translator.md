@@ -26,8 +26,8 @@ Do not translate immediately. Read the complete raw lyric file (`.tmp.txt`) from
 Load the relevant reference files:
 
 - `reference/common.md`: Absolute Red Lines, Semantic Chunking principles, Special Line Handling.
-- `reference/source/{source}.md`: Language-specific grammar signals (e.g., Japanese `て`-form chains, omitted subjects, ellipsis).
-- `reference/target/{target}.md`: Target-language cadence, breath units (4–16 characters for Chinese), and native voice checklists.
+- `reference/source/{source}.md`: Language-specific grammar signals (e.g., Japanese `て`-form chains, omitted subjects, ellipsis). Normalize regional tags (e.g., `ja-JP` → `ja.md`, `en-US` → `en.md`).
+- `reference/target/{target}.md`: Target-language cadence, breath units (4–16 characters for Chinese), and native voice checklists. Normalize regional language tags to the base profile filename in `reference/target/` (`zh-CN` / `zh-TW` / `zh-Hans` → `zh.md`, `en-US` → `en.md`, `pt-BR` → `pt.md`; use `generic.md` if no dedicated profile exists).
 - `reference/pair-exceptions.md`: False-friend kanji/cognates and bilateral traps.
 
 ---
@@ -47,12 +47,12 @@ Load the relevant reference files:
 
 1. **Track 1 (Line-level LRC text)**: Translate the entire song line by line directly into the working file (`.tmp.txt`).
    - Adhere strictly to the line-matching contract: exactly one translated line inserted below each source line.
-   - Respect enjambment pauses and audio sync: do not invert SVO/SOV word order across timestamps (e.g. do not move the main verb from line 2 to line 1 if the singer only sings it at line 2).
+   - Respect enjambment pauses and audio sync: do not invert SVO/SOV word order across timestamps (e.g. do not move the main verb from line 2 to line 1 if the singer only sings it at line 2). When a pre-nominal modifier sits on line 1 and its head noun sits on line 2, never leave a dangling line-ending `的` on line 1—frame line 1 as a clean scene/action clause and resume the noun naturally on line 2.
    - Metadata tags (`[ti:]`, `[ar:]`, etc.) and credits (`词：`, `曲：`) pass through untouched.
    - Pure vocal fillers (`oh oh`, `la la la`, `あーあー`) and sound effects (`♪`) pass through untouched.
-   - Single line length must remain within target cap (4–16 Chinese characters; absolute maximum 18).
+   - Single line length must remain within target cap (4–16 Chinese characters; absolute maximum 18). For multi-syllable hooks or loanwords (5+ syllables/morae), match their rhythmic weight with an etymology-grounded idiomatic phrase (e.g. `破茧蜕变`) rather than over-compressing to a dry 2-character gloss (`蜕变`).
 2. **Track 2 (Stanza-level Semantic Chunking & Meaning Plan — Mandatory)**:
-   - Record the semantic block plan into `<workdir>/blocks-plan.json` (and include the summary in the Handover Memo):
+   - Record the semantic block plan into `<workdir>/blocks-plan.json` (creating `<workdir>` if needed, and including the summary in the Handover Memo):
      ```json
      {
        "blocks": [
@@ -64,6 +64,8 @@ Load the relevant reference files:
      }
      ```
    - Each block groups consecutive lines forming a complete musical/semantic stanza (Verse, Chorus hook, Bridge, Outro), providing a natural, fluent sentence-level meaning for learners.
+   - **Dual-Track Terminology Lock**: Keep identical translations for all `Key Metaphors & Locked Choices`, title hooks, and recurring motifs between Track 1 (`.tmp.txt`) and Track 2 (`blocks-plan.json`). Track 2 connects syntax into fluent prose/verse without altering locked hook terms; conversely, if you find a richer cadence-matched expression while drafting Track 2, adopt it in Track 1 too.
+   - **Exact Line Indexing**: When `<workdir>/source-projection.json` exists, `blocks-plan.json` must index strictly by its 1-based projected lines (`1..lineCount`, i.e. `sourceOrder + 1`), excluding blank lines and metadata tags and including every projected vocal-filler line (`La la la...`). If `.tmp.txt` contains no blank lines, `[ti:]`/`[ar:]` metadata tags, or credit rows, its line numbers already match `1..lineCount` 1:1 (so you do not need to read the full `source-projection.json` unless metadata/blank lines are present in `.tmp.txt` and you need to verify which lines were projected).
 
 ---
 

@@ -2,7 +2,7 @@
 name: lyrics-grammar-sidecar
 description: Generate, validate, audit, and finalize SakuraUta Schema v2 lyrics grammar sidecars from local LRCs, frozen bilingual LRCs, deterministic repetition candidates, and independent semantic-audit children. Supports single-file and directory-wide batch processing.
 metadata:
-  version: "2.2.3"
+  version: "3.0.0"
 ---
 
 # Lyrics Grammar Sidecar v2
@@ -95,27 +95,23 @@ python scripts\scaffold_draft.py "<workdir>" `
 
 This deterministic tool creates all baseline lines and blocks, aligns translation text, and discovers repetition candidates. **Agents must not hand-author 2,000+ lines of structural JSON or reverse-engineer internal python scripts (`v2lib.py`, `sidecarlib.py`, etc.).**
 
-### Step 3.2: Enrich Phrases and Grammar Notes
+### Step 3.2: Author Compact Enrichment (`enrichment.json`)
 
-The grammar child enriches `semantic-draft.json` by adding high-value educational items:
+Use the compact `DRAFT INDEX` (`[blockId] lineNo | lineId | text`) and `REPETITION GROUPS` printed by `scaffold_draft.py` instead of reading the full `semantic-draft.json`. Write `<workdir>\enrichment.json` containing:
 
-- `phrases`: Key vocabulary, idioms, compound expressions, or verb phrases with translations and grammatical labels.
+- `phrases`: Key vocabulary, idioms, compound expressions, or verb phrases with `gloss`, `explanation`, and grammatical `labels`.
 - `grammarNotes`: In-depth explanations of grammatical constructs, nuances, particle functions, or stylistic features.
 
-### Step 3.3: Resolve Spans and Validate
+### Step 3.3: Merge, Resolve Spans, and Validate
 
-Run `scripts\resolve_spans.py` to automatically compute and fix Unicode code-point spans for all added phrases and notes:
+Run `scripts\resolve_spans.py --merge-enrichment` followed by `scripts\validate.py` in a single command to inject `enrichment.json`, auto-populate `surface` and Unicode code-point spans, and validate Schema v2 rules:
 
 ```powershell
-python scripts\resolve_spans.py `
+python -X utf8 scripts\resolve_spans.py `
   "<workdir>\semantic-draft.json" `
   --projection "<workdir>\source-projection.json" `
-  --in-place
-```
-
-Verify that the draft passes all Schema v2 rules:
-
-```powershell
+  --merge-enrichment "<workdir>\enrichment.json" `
+  --in-place && `
 python -X utf8 scripts\validate.py `
   "<workdir>\semantic-draft.json" `
   --projection "<workdir>\source-projection.json" `
@@ -181,7 +177,7 @@ python scripts\audit_summary.py "<workdir>" `
   --replace
 ```
 
-This prints a concise 1-page alignment table of blocks, lines, translations, and synthesized meanings to stdout and pre-populates `semantic-audit.json` with `status: "pass"`. **The audit child must not dump thousands of lines of candidate JSON into context or write temporary python scripts.**
+This prints a concise 1-page alignment table of blocks, lines, translations, phrases, grammar notes, and synthesized meanings to stdout and pre-populates `semantic-audit.json` with `status: "pass"`. **The audit child must not dump thousands of lines of candidate JSON into context or write temporary python scripts.**
 
 ### Step 5.2: Evaluate and Report
 
@@ -249,14 +245,15 @@ dirname(lrc) / basename(lrc, ".lrc") + ".json"
 
 Existing differing output is preserved unless the user explicitly passes `--replace`. An existing Schema v1 production file must be regenerated with `--replace`; there is no v1 read or migration path.
 
-Then validate the production result and chain:
+Then validate the production result and chain, and automatically delete `<workdir>` (`<song>.grammar-work`) once all checks pass:
 
 ```powershell
 python scripts\validate_all.py `
   "<song.lrc>" "<song.json>" `
   --projection "<workdir>\source-projection.json" `
   --workdir "<workdir>" `
-  --learner-language "<learner language>"
+  --learner-language "<learner language>" `
+  --cleanup-workdir
 ```
 
 ## Batch Operations
@@ -308,10 +305,10 @@ Atomically produces sibling `<song>.json` for each song passing full cryptograph
 - **Batch Complete Validation**:
 
 ```powershell
-python scripts\validate_all.py --batch "<song1.lrc>" "<song2.lrc>" ... --learner-language "<learner language>"
+python scripts\validate_all.py --batch "<song1.lrc>" "<song2.lrc>" ... --learner-language "<learner language>" --cleanup-workdir
 ```
 
-Verifies the production artifacts and complete audit chains across all songs, returning exit code 0 on complete batch success.
+Verifies the production artifacts and complete audit chains across all songs, automatically removes each passing song's `<song>.grammar-work` directory, and returns exit code 0 on complete batch success.
 
 ### 2. No-Read Verification Principle (免读验证原则)
 

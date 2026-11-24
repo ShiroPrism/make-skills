@@ -34,7 +34,7 @@ TIMESTAMP_RE = re.compile(r'\[\d{2}:\d{2}\.\d{2,3}\]')
 
 def strip_text(text: str) -> str:
     lines = text.splitlines()
-    stripped_lines = [TIMESTAMP_RE.sub('', line) for line in lines]
+    stripped_lines = [TIMESTAMP_RE.sub('', line).strip() for line in lines]
     return '\n'.join(stripped_lines)
 
 

@@ -51,7 +51,13 @@ FILLER_RE = re.compile(
 
 
 def _strip_timestamps(line: str) -> str:
-    return TIMESTAMP_RE.sub('', line).rstrip()
+    return TIMESTAMP_RE.sub('', line).strip()
+
+
+def _timestamp_separator(line: str) -> str:
+    """Preserve a single space after timestamps if the source line uses one."""
+    after_ts = TIMESTAMP_RE.sub('', line)
+    return ' ' if after_ts.startswith((' ', '\t')) else ''
 
 
 def _is_metadata_tag(text: str) -> bool:
@@ -99,7 +105,7 @@ def build_translation_map(txt_path: Path, original_texts: set[str]) -> dict[str,
 
     pending_source: str | None = None
     for line in lines:
-        text = line.rstrip()
+        text = line.strip()
         if not text:
             pending_source = None
             continue
@@ -209,8 +215,9 @@ def merge_single_file(lrc_path: Path, txt_path: Path, force: bool = False) -> bo
 
         translation = translation_map.get(text)
         if translation:
+            sep = _timestamp_separator(line)
             for ts in timestamps:
-                output.append(f"{ts}{translation}")
+                output.append(f"{ts}{sep}{translation}")
 
     # Write merged bilingual LRC
     lrc_path.write_text('\n'.join(output), encoding='utf-8')

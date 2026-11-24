@@ -78,20 +78,26 @@ def build_audit_summary(
             if occ_id:
                 mu_by_occurrence_id[occ_id] = mu
 
-    # Group phrases and notes by line
-    phrases_by_line: dict[str, list[dict]] = {}
+    # Group phrases by (blockId, lineId) and grammarNotes by blockId using Schema v2 fields
+    phrases_by_block_line: dict[tuple[str, str], list[dict]] = {}
     for p in phrases:
-        for s in p.get("sourceSpans", []):
-            lid = s.get("lineId")
-            if lid:
-                phrases_by_line.setdefault(lid, []).append(p)
+        seen_keys: set[tuple[str, str]] = set()
+        for occ in p.get("occurrences", []):
+            occ_bid = occ.get("blockId", "")
+            for seg in occ.get("sourceSegments", []):
+                lid = seg.get("lineId")
+                if not lid:
+                    continue
+                key = (occ_bid, lid)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    phrases_by_block_line.setdefault(key, []).append(p)
 
-    notes_by_line: dict[str, list[dict]] = {}
+    notes_by_block: dict[str, list[dict]] = {}
     for n in notes:
-        for s in n.get("sourceSpans", []):
-            lid = s.get("lineId")
-            if lid:
-                notes_by_line.setdefault(lid, []).append(n)
+        scope = n.get("scope", {})
+        for bid in scope.get("blockIds", []):
+            notes_by_block.setdefault(bid, []).append(n)
 
     out: list[str] = []
     song_source = candidate.get("source", {}).get("lrcFile", "unknown")
@@ -127,10 +133,13 @@ def build_audit_summary(
             out.append(f"  {line_obj.get('language', 'src').upper()}: {src_text}")
             out.append(f"  TR : {tr_text}")
 
-            line_phrases = phrases_by_line.get(lid, [])
+            line_phrases = phrases_by_block_line.get((bid, lid), [])
             if line_phrases:
-                p_items = [f"{p.get('text', '')} ({p.get('translation', '')})" for p in line_phrases]
-                out.append(f"       phrases: {', '.join(p_items)}")
+                for p in line_phrases:
+                    surf = p.get("surface", "")
+                    gloss = p.get("gloss", "")
+                    expl = p.get("explanation", "")
+                    out.append(f"       phrase [{p.get('phraseId', '')}]: {surf} [{gloss}] — {expl}")
 
         # Block meaning units
         b_parts = b.get("meaning", {}).get("parts", [])
@@ -155,6 +164,11 @@ def build_audit_summary(
                 out.append(f"  => MU [{mu_id}]: {mu_text}")
         else:
             out.append("  => MU: [WARNING: No meaning unit attached to this block]")
+
+        for note in notes_by_block.get(bid, []):
+            scope_phrase = note.get("scope", {}).get("phraseId")
+            phrase_tag = f" ({scope_phrase})" if scope_phrase else ""
+            out.append(f"  => NOTE [{note.get('noteId', '')}]{phrase_tag}: {note.get('explanation', '')}")
 
     out.append("\n" + "=" * 72)
     out.append("PRE-AUDIT DIAGNOSTICS:")

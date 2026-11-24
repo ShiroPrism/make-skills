@@ -109,7 +109,18 @@ def resolve_draft_spans(
     for phrase in draft.get("phrases", []):
         p_id = phrase.get("phraseId", "unknown_phrase")
         surface = phrase.get("surface")
-        for occ in phrase.get("occurrences", []):
+        occurrences = phrase.get("occurrences", [])
+        if (not isinstance(surface, str) or not surface) and occurrences:
+            first_segs = occurrences[0].get("sourceSegments", [])
+            derived = "".join(
+                seg.get("text", "")
+                for seg in first_segs
+                if isinstance(seg, dict) and isinstance(seg.get("text"), str)
+            )
+            if derived:
+                phrase["surface"] = derived
+                surface = derived
+        for occ in occurrences:
             occ_id = occ.get("occurrenceId", "unknown_occ")
             segs = occ.get("sourceSegments", [])
             if len(segs) == 1 and isinstance(surface, str) and not segs[0].get("text"):
@@ -117,6 +128,31 @@ def resolve_draft_spans(
             process_segments("phrase", p_id, occ_id, segs)
 
     return resolved, errors, messages
+
+
+ALLOWED_ENRICHMENT_KEYS = frozenset({"phrases", "grammarNotes", "relations", "uncertainties"})
+
+
+def merge_enrichment_into_draft(draft: dict[str, Any], enrichment: dict[str, Any]) -> list[str]:
+    """Merge compact enrichment payload (phrases, grammarNotes, etc.) into draft."""
+    if not isinstance(enrichment, dict):
+        raise SidecarError("invalid_enrichment", "Enrichment payload must be a JSON object.")
+    unknown_keys = set(enrichment.keys()) - ALLOWED_ENRICHMENT_KEYS
+    if unknown_keys:
+        raise SidecarError(
+            "invalid_enrichment",
+            f"Unsupported top-level key(s) in enrichment JSON: {sorted(unknown_keys)}. "
+            f"Allowed: {sorted(ALLOWED_ENRICHMENT_KEYS)}",
+        )
+    merged_keys: list[str] = []
+    for key in ("phrases", "grammarNotes", "relations", "uncertainties"):
+        if key in enrichment:
+            value = enrichment[key]
+            if not isinstance(value, list):
+                raise SidecarError("invalid_enrichment", f"Enrichment field '{key}' must be an array.")
+            draft[key] = value
+            merged_keys.append(f"{key}={len(value)}")
+    return merged_keys
 
 
 def main() -> int:
@@ -132,6 +168,11 @@ def main() -> int:
         "--in-place",
         action="store_true",
         help="Update spans in semantic-draft.json directly",
+    )
+    parser.add_argument(
+        "--merge-enrichment",
+        type=Path,
+        help="Optional enrichment.json (phrases, grammarNotes, relations, uncertainties) to merge into draft before resolving spans",
     )
     parser.add_argument(
         "--line",
@@ -191,11 +232,17 @@ def main() -> int:
     draft_path = args.draft.expanduser()
     try:
         draft = read_json(draft_path)
+        merged_keys: list[str] = []
+        if args.merge_enrichment is not None:
+            enrichment_path = args.merge_enrichment.expanduser()
+            enrichment = read_json(enrichment_path)
+            merged_keys = merge_enrichment_into_draft(draft, enrichment)
+            print(f"Merged enrichment: {', '.join(merged_keys) if merged_keys else 'none'}")
         resolved, errors, messages = resolve_draft_spans(draft, projection)
         for msg in messages:
             print(msg)
         print(f"Summary: {resolved} span(s) resolved, {errors} error(s)")
-        if args.in_place and resolved > 0 and errors == 0:
+        if args.in_place and errors == 0 and (resolved > 0 or args.merge_enrichment is not None):
             write_json_atomic(draft_path, draft, replace=True)
             print(f"updated: {draft_path}")
         return 1 if errors > 0 else 0

@@ -19,9 +19,9 @@ When invoked frequently, apply these 8 rules first:
    2. **Timeline alignment** — one output line per source line
    3. **Single-line readability** (lowest) — desirable but subordinate to #1 and #2
 
-   → Do **not** force a non-closing clause into a complete standalone sentence to satisfy single-line readability. Front-loading the next line's conclusion is also prohibited.
+   → Do **not** force a non-closing clause into a complete standalone sentence to satisfy single-line readability. Front-loading the next line's conclusion is also prohibited. However, **never leave an orphaned modifier particle at the end of a line** (such as a bare trailing `的` in Chinese from a Japanese pre-nominal clause). Reframe the modifier line into a natural scene or state clause without trailing `的`, and resume the head noun on the next line with a demonstrative or continuation.
 
-7. **Consistent key terms**: Use the same translation for choruses, hooks, core imagery, and the song title throughout the entire file. Reuse identical wording for repeated lines.
+7. **Consistent key terms & rhythmic weight**: Use the same translation for choruses, hooks, core imagery, and the song title throughout the entire file, and keep identical key terms across Track 1 (`.tmp.txt`) and Track 2 (`blocks-plan.json`). When a multi-syllable foreign loanword or core hook (5+ syllables/morae, such as `メタモルフォーゼ`) carries strong musical weight, prefer an idiomatic expression grounded in its etymology and song motif (e.g., `破茧蜕变`) rather than collapsing it into a clipped two-character gloss (`蜕变`)—provided the line stays within the target length cap. Reuse identical wording for repeated lines.
 8. **Final check before output**: Confirm no target-language lines were modified, no metadata was touched, no third line was stacked onto a source line, no plot points were added, and all line lengths are within cap.
 
 ---

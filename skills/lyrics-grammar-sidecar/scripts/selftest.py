@@ -2443,6 +2443,22 @@ class GrammarSidecarV2Tests(unittest.TestCase):
                 "--learner-language",
                 "zh-CN",
             )
+            self.assertTrue(work.is_dir())
+            cleanup_proc = self.run_cli(
+                str(scripts / "validate_all.py"),
+                str(source),
+                str(output),
+                "--projection",
+                str(projection_path),
+                "--workdir",
+                str(work),
+                "--learner-language",
+                "zh-CN",
+                "--cleanup-workdir",
+            )
+            self.assertIn("cleanedWorkdir", cleanup_proc.stdout)
+            self.assertFalse(work.exists())
+            self.assertTrue(output.is_file())
 
 
     def test_discover_repetitions_in_place_and_resolve_spans(self) -> None:
@@ -2675,7 +2691,7 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             self.assertTrue((base / "song_a.json").is_file())
             self.assertTrue((base / "song_b.json").is_file())
 
-            # 5. Batch validate_all
+            # 5. Batch validate_all with --cleanup-workdir
             proc = self.run_cli(
                 str(scripts / "validate_all.py"),
                 "--batch",
@@ -2683,9 +2699,12 @@ class GrammarSidecarV2Tests(unittest.TestCase):
                 str(src_b),
                 "--learner-language",
                 "zh-CN",
+                "--cleanup-workdir",
             )
             self.assertIn("[PASS] song_a.lrc -> song_a.json", proc.stdout)
             self.assertIn("[PASS] song_b.lrc -> song_b.json", proc.stdout)
+            self.assertFalse((base / "song_a.grammar-work").exists())
+            self.assertFalse((base / "song_b.grammar-work").exists())
 
     def test_record_isolation_shorthand_resolution(self) -> None:
         """Test record_isolation.py shorthand path resolution and defaults."""
@@ -2820,17 +2839,81 @@ class GrammarSidecarV2Tests(unittest.TestCase):
             )
 
             # Scaffold draft CLI
-            self.run_cli(
+            scaffold_res = self.run_cli(
                 str(scripts / "scaffold_draft.py"),
                 str(work),
                 "--learner-language",
                 "zh-CN",
             )
+            self.assertIn("DRAFT INDEX", scaffold_res.stdout)
             draft = read_json(work / "semantic-draft.json")
             self.assertEqual(draft["schemaVersion"], 2)
             self.assertGreater(len(draft["lines"]), 0)
             self.assertGreater(len(draft["blocks"]), 0)
             self.assertGreater(len(draft["meaningUnits"]), 0)
+
+            # Enrich via compact enrichment.json + resolve_spans.py --merge-enrichment
+            first_line = draft["lines"][0]
+            enrichment_path = work / "enrichment.json"
+            enrichment_path.write_text(
+                json.dumps(
+                    {
+                        "phrases": [
+                            {
+                                "phraseId": "p_cli_first",
+                                "kind": "phrase",
+                                "role": "theme",
+                                "labels": [{"namespace": "syntax", "key": "phrase"}],
+                                "explanation": "测试短语的语法说明。",
+                                "gloss": "测试短语",
+                                "confidence": 0.9,
+                                "occurrences": [
+                                    {
+                                        "occurrenceId": "po_cli_first_1",
+                                        "blockId": draft["blocks"][0]["blockId"],
+                                        "sourceSegments": [
+                                            {
+                                                "lineId": first_line["lineId"],
+                                                "text": first_line["text"],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                        "grammarNotes": [
+                            {
+                                "noteId": "gn_cli_1",
+                                "scope": {
+                                    "blockIds": [draft["blocks"][0]["blockId"]],
+                                    "phraseId": "p_cli_first",
+                                    "occurrenceIds": ["po_cli_first_1"],
+                                },
+                                "explanation": "测试语法笔记。",
+                                "labels": [{"namespace": "syntax", "key": "note"}],
+                                "confidence": 0.9,
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            self.run_cli(
+                str(scripts / "resolve_spans.py"),
+                str(work / "semantic-draft.json"),
+                "--projection",
+                str(projection_path),
+                "--merge-enrichment",
+                str(enrichment_path),
+                "--in-place",
+            )
+            draft = read_json(work / "semantic-draft.json")
+            self.assertEqual(draft["phrases"][0]["surface"], first_line["text"])
+            self.assertEqual(
+                draft["phrases"][0]["occurrences"][0]["sourceSegments"][0]["end"],
+                len(first_line["text"]),
+            )
 
             # 3. Freeze candidate with prepare.py
             self.run_cli(
@@ -2870,6 +2953,8 @@ class GrammarSidecarV2Tests(unittest.TestCase):
                 "--replace",
             )
             self.assertIn("SEMANTIC AUDIT SUMMARY", res.stdout)
+            self.assertIn("phrase [p_cli_first]:", res.stdout)
+            self.assertIn("=> NOTE [gn_cli_1] (p_cli_first):", res.stdout)
             audit = read_json(work / "semantic-audit.json")
             self.assertEqual(audit["status"], "pass")
             self.assertEqual(len(audit["reviewedBlockIds"]), len(draft["blocks"]))

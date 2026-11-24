@@ -2,7 +2,7 @@
 name: lyrics-translator
 description: High-fidelity lyric translation across global languages (dedicated profiles for ZH, JA, KO, EN, FR, ES, DE, IT, PT, RU, TH, VI, YUE, plus generic fallback). Implements an Adversarial 3-Stage Pipeline (Initial Translation → Independent Falsification Review in fresh context → Arbitration & Polish) to eliminate confirmation bias and contextual contradictions like literal idiom traps. Supports single-file and directory-wide sliding-window batch translation. Preserves source lines and inserts exactly one target-language line below each.
 metadata:
-  version: "2.0.0"
+  version: "3.0.0"
 ---
 
 # Lyric Translator — Adversarial 3-Stage Pipeline
@@ -57,8 +57,8 @@ Dispatched to translate the raw lyrics stripped by `lrc_strip.py`:
    - `reference/target/{target}.md`: Target breath units (4–16 characters for Chinese), register rules.
    - `reference/pair-exceptions.md`: False-friend kanji/cognates.
 3. **Dual-Track Output**:
-   - **Track 1 (Line-level LRC text)**: Writes the line-by-line translation directly into `.tmp.txt`, adhering strictly to audio sync and line-matching constraints without inverting cross-line word order.
-   - **Track 2 (Stanza-level Semantic Chunking & Meaning Plan — Mandatory)**: Writes `<workdir>/blocks-plan.json` to record natural stanza boundaries and coherent literary translations for each block, ensuring dependent enjambments remain unified and downstream sidecars have fluent semantic units.
+   - **Track 1 (Line-level LRC text)**: Writes the line-by-line translation directly into `.tmp.txt`, adhering strictly to audio sync and line-matching constraints without inverting cross-line word order or leaving dangling line-ending `的`.
+   - **Track 2 (Stanza-level Semantic Chunking & Meaning Plan — Mandatory)**: Writes `<workdir>/blocks-plan.json` to record natural stanza boundaries and coherent literary translations for each block, keeping locked key terms identical to Track 1 and indexing against `source-projection.json` when available.
 4. **Handover**: Outputs the Song Persona memo, handover plan, and flags potential ambiguities for the Reviewer. Do not dump or print full translated lyrics in chat messages (the disk file is authoritative).
 
 ### Stage 2: Adversarial Quality Review (`roles/reviewer.md`)
@@ -70,8 +70,8 @@ Dispatched as a **completely fresh subagent (clean context window)** with zero m
    - **Dictionary First-Sense Traps (首选字面义陷阱)**: Catches idioms or polysemous phrases translated literally that contradict song context (e.g., 「もういいかい？」 as "藏好了吗" vs. cynical "够了吗").
    - **Contextual Contradictions (语境冲突与因果断裂)**: Catches lines creating emotional or logical breaks with lines $N-2 \dots N+2$.
    - **Persona & Pronoun Consistency**: Ensures voice stability and eliminates hallucinated subjects.
-   - **Red Line Adherence**: Checks character limits and ensures zero plot injection.
-   - **Stanza Boundary Integrity (乐段分界与跨行检查)**: Audits `<workdir>/blocks-plan.json` to ensure mid-sentence enjambments are never cut across blocks (e.g. keeping `May I call you my` and `d-r-e-a-m` together), and confirms each stanza meaning is faithful and complete.
+   - **Red Lines, Syntax & Weight Traps**: Checks character limits, zero plot injection, dangling line-ending `的` on SOV splits, and weight collapse on multi-syllable hooks.
+   - **Stanza Boundary & Cross-Track Term Alignment**: Audits `<workdir>/blocks-plan.json` to ensure mid-sentence enjambments are never cut across blocks, indices cover `1..lineCount` completely, and Track 1 / Track 2 key terms unify onto the stronger, cadence-matched rendering.
 3. **Output**: Structured Issue Directives categorized into `Critical Defects (Mandatory Fixes)` and `Stylistic Polish`.
 
 ### Stage 3: Arbitration, Polish & Final Integration (`roles/arbiter.md`)
@@ -79,7 +79,7 @@ Dispatched as a **completely fresh subagent (clean context window)** with zero m
 Finalizes the translation and guarantees deterministic output:
 
 1. **Arbitration**: Mandatorily adopts all confirmed critical defect fixes; arbitrates stylistic suggestions against the Song Persona.
-2. **Cadence Polish**: Enforces natural target breath groups (4–16 characters for Chinese) and eliminates translationese (`的`-chains, Europeanized passives).
+2. **Cadence Polish**: Enforces natural target breath groups (4–16 characters for Chinese), eliminates translationese (`的`-chains, dangling line-ending `的`, Europeanized passives), and keeps core hooks unified across both tracks.
 3. **Physical Write**: Commits revised lines back to `.tmp.txt` in a single write pass rather than multi-turn line edits, and writes the finalized, audited `<workdir>/blocks-plan.json` to disk.
 4. **Deterministic Gate**: Runs `python scripts/lrc_merge.py <original.lrc> <translated.tmp.txt>` and verifies console outputs `[OK]`.
    - **No-Read Verification Principle**: Once `lrc_merge.py` exits 0 with `[OK]`, timeline integrity, line-count parity, and metadata immunity are 100% mathematically proven. Never call file-reading tools on merged `.lrc` files.

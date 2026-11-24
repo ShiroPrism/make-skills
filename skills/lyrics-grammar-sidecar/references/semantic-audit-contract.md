@@ -56,9 +56,9 @@ python scripts\audit_summary.py "<workdir>" `
   --replace
 ```
 
-This prints a concise 1-page alignment table of candidate blocks, source lines, frozen translations, and synthesized meanings, while automatically pre-populating `semantic-audit.json` with 100% complete `reviewedBlockIds` and `reviewedMeaningUnitIds`.
+This prints a concise 1-page alignment table of candidate blocks, source lines, frozen translations, phrases, grammar notes, and synthesized meanings, while automatically pre-populating `semantic-audit.json` with 100% complete `reviewedBlockIds` and `reviewedMeaningUnitIds`.
 
-Auditors must not dump multi-megabyte candidate JSON files into context or inspect internal Python scripts (`v2lib.py`, `sidecarlib.py`, etc.).
+Auditors must not dump multi-megabyte candidate JSON files into context or inspect internal Python scripts (`v2lib.py`, `sidecarlib.py`, etc.). Because `audit_summary.py` prints meaning units, phrases, and grammar notes together, you normally do not need to read `analysis-candidate.json` or `semantic-draft.json` unless verifying a specific JSON path for a finding.
 
 Finding shape:
 
@@ -98,18 +98,4 @@ python -X utf8 scripts\validate_audit.py `
 
 On Windows, always invoke Python with `-X utf8` to avoid OEM code page corruption with Japanese and Chinese text.
 
-Then record the audit child's actual transcript identity:
-
-```powershell
-python scripts\record_isolation.py `
-  "<workdir>\source-projection.json" `
-  --stage semantic-audit `
-  --artifact "<workdir>\semantic-audit.json" `
-  --method native-subagent `
-  --child-transcript-id "<actual-audit-child-id>" `
-  --parent-transcript-id "<actual-parent-id>" `
-  --output "<workdir>\isolation-semantic-audit.json" `
-  --replace
-```
-
-Do not invent transcript IDs. The grammar proof and audit proof must contain different `childTranscriptId` values. Each proof binds the actual artifact SHA-256. A same-child audit, v1 proof, stale projection hash, changed report, or failed audit must prevent finalization.
+Do not write isolation proofs or invent transcript IDs inside the audit child. After the audit child returns, the parent coordinator records `isolation-semantic-audit.json` using the audit child's actual transcript ID. The grammar proof and audit proof must contain different `childTranscriptId` values, and each proof binds the actual artifact SHA-256. A same-child audit, v1 proof, stale projection hash, changed report, or failed audit must prevent finalization.

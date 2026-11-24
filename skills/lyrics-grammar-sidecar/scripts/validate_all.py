@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -18,6 +19,19 @@ from sidecarlib import (
 from v2lib import validate_finalized_sidecar_v2
 
 
+def _cleanup_workdir_dir(workdir_path: Path, report_path: Path | None = None) -> str | None:
+    """Remove a .grammar-work directory after full validation passes."""
+    resolved_workdir = workdir_path.expanduser().resolve()
+    if not resolved_workdir.name.endswith(".grammar-work") or not resolved_workdir.is_dir():
+        return None
+    if report_path is not None:
+        resolved_report = report_path.expanduser().resolve()
+        if resolved_workdir == resolved_report or resolved_workdir in resolved_report.parents:
+            return None
+    shutil.rmtree(resolved_workdir)
+    return str(resolved_workdir)
+
+
 def validate_single_sidecar(
     lrc_path: Path,
     sidecar_path: Path,
@@ -25,6 +39,7 @@ def validate_single_sidecar(
     workdir_path: Path,
     learner_language: str,
     report_path: Path | None = None,
+    cleanup_workdir: bool = False,
 ) -> tuple[dict, list]:
     raw_sidecar_path = sidecar_path.expanduser()
     if raw_sidecar_path.is_symlink():
@@ -68,6 +83,10 @@ def validate_single_sidecar(
     }
     if resolved_report is not None:
         write_json_atomic(resolved_report, report, replace=True)
+    if cleanup_workdir and not issues:
+        cleaned = _cleanup_workdir_dir(resolved_workdir, resolved_report)
+        if cleaned is not None:
+            report["cleanedWorkdir"] = cleaned
     return report, issues
 
 
@@ -95,6 +114,11 @@ def main() -> int:
     )
     parser.add_argument("--report", type=Path, help="Optional validation report (single mode)")
     parser.add_argument("--learner-language", required=True)
+    parser.add_argument(
+        "--cleanup-workdir",
+        action="store_true",
+        help="Delete <song>.grammar-work directory automatically after validation passes",
+    )
     args = parser.parse_args()
 
     if args.batch:
@@ -112,6 +136,7 @@ def main() -> int:
                     proj_path,
                     workdir,
                     args.learner_language,
+                    cleanup_workdir=args.cleanup_workdir,
                 )
                 summary.append(report)
                 status = "PASS" if not issues else "FAIL"
@@ -141,6 +166,7 @@ def main() -> int:
             args.workdir,
             args.learner_language,
             report_path=args.report,
+            cleanup_workdir=args.cleanup_workdir,
         )
     except (SidecarError, FileNotFoundError, json.JSONDecodeError) as exc:
         print(f"ERROR [invalid_sidecar] $: {exc}", file=sys.stderr)

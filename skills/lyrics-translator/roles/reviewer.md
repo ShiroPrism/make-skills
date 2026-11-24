@@ -35,15 +35,18 @@ Audit the draft strictly line-by-line across these four critical failure modes:
   - Does the tone align with the Persona defined in the Handover Memo? (e.g., does a provocative, sultry character sound like an office bureaucrat?)
   - Did the translator hallucinate subjects ("你", "我", "他") that distort the song's deliberate ambiguity?
 
-### 4. Absolute Red Lines Check (对照 `reference/common.md`)
+### 4. Absolute Red Lines & Syntax/Weight Traps (对照 `reference/common.md` & `reference/target/{target}.md`)
 
 - **No Plot Injection**: Did the translator add backstory, motivations, or plot twists not in the source?
 - **Line Length Cap**: Does any Chinese line exceed 16 characters (hard ceiling 18)?
 - **Filler & Metadata Immunity**: Did the translator touch metadata or translate pure vocal fillers (`oh oh`, `la la la`, `あーあー`)?
+- **Dangling Modifier Trap (`行尾悬空「的」`)**: Does any line end in an orphaned `的` caused by literal SOV modifier splitting across timestamps (e.g., `从曾憧憬的门扉流溢而出的` / `试着捧起那束光芒`)? Flag this as a defect and instruct reframing line 1 into a smooth scene/action clause without trailing `的`.
+- **Hook Weight Collapse (`长音节 Hook 欠译`)**: Were 5+ syllable/mora title words or foreign loanword hooks overly compressed into clipped 2-character glosses (`蜕变`) when an etymology-grounded 4-character expression (`破茧蜕变`) better matches the melody and fits well within the character cap?
 
-### 5. Stanza Boundary Integrity (乐段分界与跨行检查)
+### 5. Stanza Boundary & Cross-Track Alignment (`blocks-plan.json`)
 
-- Audit `<workdir>/blocks-plan.json` to verify that block boundaries do not sever mid-sentence enjambments across lines (e.g., ensuring `May I call you my` and `d-r-e-a-m` remain in the same block), and confirm every stanza `meaning` is a faithful synthesis without hallucinated plot.
+- **Boundary & Index Integrity**: Audit `<workdir>/blocks-plan.json` to verify that block boundaries do not sever mid-sentence enjambments across lines (e.g., ensuring `May I call you my` and `d-r-e-a-m` remain in the same block), confirm every stanza `meaning` is faithful without hallucinated plot, and (when `source-projection.json` exists) verify exact monotonic coverage of `1..lineCount` with zero skipped lines (including vocal fillers) or out-of-bounds indices.
+- **Cross-Track Terminology Alignment & Best-of-Both Unification**: Compare Track 1 (`.tmp.txt`), Handover Memo (`Locked Choices`), and Track 2 (`blocks-plan.json`). Any divergence on recurring hooks or core imagery between Track 1 and Track 2 (e.g., `蜕变` in `.tmp.txt` vs. `破茧蜕变` in `blocks-plan.json`) must be flagged as a **Critical Defect (`术语漂移`)**. Evaluate which rendering better fits the persona and musical syllable weight, and explicitly direct the Arbiter to unify both tracks onto the stronger phrasing (upgrade Track 1 rather than downgrading Track 2 when Track 2 is more expressive and faithful).
 
 ---
 

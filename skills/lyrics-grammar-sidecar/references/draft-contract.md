@@ -9,7 +9,7 @@ The grammar projection keeps timed title/artist header rows and excludes credit 
 ## Pipeline Boundary
 
 ```text
-semantic-draft.json (scaffold_draft.py -> enrich phrases/notes -> resolve_spans.py)
+semantic-draft.json (scaffold_draft.py -> enrichment.json -> resolve_spans.py --merge-enrichment)
   -> prepare.py
   -> analysis-candidate.json + analysis-candidate.sha256
   -> independent semantic-audit child (audit_summary.py)
@@ -21,9 +21,16 @@ semantic-draft.json (scaffold_draft.py -> enrich phrases/notes -> resolve_spans.
 
 The grammar child must follow the 3-step single-pass authoring workflow:
 
-1. **Scaffold**: Run `python scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions` to generate a 100% Schema v2 compliant initial draft with lines, blocks, agent-authored stanza meanings, and repetition groups pre-filled. `scaffold_draft.py` strictly requires `<workdir>\blocks-plan.json` (produced by `lyrics-translator` in Dual-Track Mode) to adopt the LLM's natural stanza boundaries and fluent sentence-level meanings.
-2. **Enrich**: Add educational `phrases` and `grammarNotes` with clear learner-facing explanations and translations. If needed, authors may also fine-tune `lineIds` in `blocks` to adjust enjambment boundaries.
-3. **Resolve Spans & Validate**: Run `python scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --in-place` followed by `python scripts\validate.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --learner-language "<target>"`.
+1. **Scaffold**: Run `python -X utf8 scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions` to generate a 100% Schema v2 compliant initial draft with lines, blocks, agent-authored stanza meanings, and repetition groups pre-filled. `scaffold_draft.py` strictly requires `<workdir>\blocks-plan.json` (produced by `lyrics-translator` in Dual-Track Mode) and prints a compact **DRAFT INDEX** (`[blockId] lineNo | lineId | text`) plus any **REPETITION GROUPS** directly to stdout so you do **not** need to read the 1,000+ line `semantic-draft.json`.
+2. **Author Compact Enrichment**: Write `<workdir>\enrichment.json` containing only `phrases`, `grammarNotes` (and optional `relations` / `uncertainties`), using the `blockId` and `lineId` values from the printed DRAFT INDEX. Avoid reading `semantic-draft.json` or `lyrics-grammar-analysis.schema.json`, and never use 20+ sequential `edit_file` calls on `semantic-draft.json`.
+3. **Merge, Resolve Spans & Validate**: Run both commands in one shell call:
+   `python -X utf8 scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --merge-enrichment "<workdir>\enrichment.json" --in-place && python -X utf8 scripts\validate.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --learner-language "<target>"`
+
+### Quick Field Checklist (`enrichment.json`)
+
+- **`phrases[]` required keys**: `phraseId`, `kind` (`"word" | "phrase" | "clause" | "idiom" | "expression" | "token" | "other"`), `surface` (auto-derived from first occurrence `sourceSegments` if omitted), `role`, `labels` (`[{"namespace": "...", "key": "..."}]`), `explanation` (in `learnerLanguage`), `gloss` (in `learnerLanguage`), `confidence` (`0..1`), `occurrences` (`[{"occurrenceId": "...", "blockId": "...", "sourceSegments": [{"lineId": "...", "text": "..."}]}]`; `start`/`end` are auto-computed by `resolve_spans.py`).
+- **`grammarNotes[]` required keys**: `noteId`, `scope` (`{"blockIds": ["b_01"], "phraseId": "...", "occurrenceIds": ["..."]}` — omit `phraseId`/`occurrenceIds` for block-only notes; never pass `occurrenceIds` without `phraseId`), `explanation` (in `learnerLanguage`), `labels`, `confidence`.
+- **Shared repetitions**: If a phrase lies inside a `REPETITION GROUPS` span, include one occurrence per block in that repetition group at identical canonical offsets.
 
 Agents must not inspect or read internal library scripts (`v2lib.py`, `sidecarlib.py`, etc.), dump full files into context, or author structural lines/blocks manually.
 

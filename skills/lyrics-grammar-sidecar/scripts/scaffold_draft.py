@@ -428,6 +428,27 @@ def main() -> int:
                 print(f"  - {issue.code}: {issue.message}")
         else:
             print("[PASS] Initial scaffold passed 100% of Schema v2 validation rules.")
+
+        # Print compact Block/Line ID Index so the grammar child does not need to read the full JSON
+        line_by_id = {line["lineId"]: line for line in draft["lines"]}
+        print("\n--- DRAFT INDEX (for enrichment.json) ---")
+        for block in draft["blocks"]:
+            bid = block["blockId"]
+            for lid in block.get("lineIds", []):
+                line_obj = line_by_id.get(lid)
+                if line_obj:
+                    print(f"[{bid}] {line_obj['sourceOrder'] + 1} | {lid} | {line_obj['text']}")
+        if draft.get("repetitionGroups"):
+            print("\n--- REPETITION GROUPS ---")
+            for rep in draft["repetitionGroups"]:
+                occ_parts = []
+                sample_text = ""
+                for occ in rep.get("occurrences", []):
+                    seg_ids = [s.get("lineId", "") for s in occ.get("sourceSegments", [])]
+                    if not sample_text:
+                        sample_text = "".join(s.get("text", "") for s in occ.get("sourceSegments", []))
+                    occ_parts.append(f"{occ.get('blockId', '')} ({','.join(seg_ids)})")
+                print(f"{rep.get('repetitionId', '')}: {' == '.join(occ_parts)} | {sample_text}")
         return 0
     except SidecarError as exc:
         print(f"ERROR [{exc.code}]: {exc.message}", file=sys.stderr)

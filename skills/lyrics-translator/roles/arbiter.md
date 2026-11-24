@@ -26,8 +26,8 @@ Perform a final rhythm and singability check on the revised text:
 
 - **Character Count**: Ensure lines remain within 4–16 Chinese characters (absolute ceiling 18).
 - **Breath Groups**: Ensure long clauses break at natural rhythmic pauses.
-- **Translationese Cleansing**: Eliminate awkward `的`-chains, Europeanized passive constructions (`被...`), and unnatural explicit connectives (`虽然...但是...`, `因此`).
-- **Hook & Chorus Consistency**: Ensure repeated chorus lines maintain identical, unified wording across the entire file unless the original Japanese deliberately alters a word.
+- **Translationese Cleansing**: Eliminate awkward `的`-chains, dangling line-ending `的` from cross-line pre-nominal splits, Europeanized passive constructions (`被...`), and unnatural explicit connectives (`虽然...但是...`, `因此`).
+- **Hook, Chorus & Cross-Track Consistency**: Ensure repeated chorus lines and core hooks maintain identical, unified wording across `.tmp.txt` and `<workdir>/blocks-plan.json` (adopting the stronger, cadence-matched phrasing in both tracks unless the source deliberately varies).
 
 ---
 
