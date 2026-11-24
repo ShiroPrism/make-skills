@@ -41,6 +41,10 @@ Audit the draft strictly line-by-line across these four critical failure modes:
 - **Line Length Cap**: Does any Chinese line exceed 16 characters (hard ceiling 18)?
 - **Filler & Metadata Immunity**: Did the translator touch metadata or translate pure vocal fillers (`oh oh`, `la la la`, `あーあー`)?
 
+### 5. Stanza Boundary Integrity (乐段分界与跨行检查)
+
+- Audit `<workdir>/blocks-plan.json` to verify that block boundaries do not sever mid-sentence enjambments across lines (e.g., ensuring `May I call you my` and `d-r-e-a-m` remain in the same block), and confirm every stanza `meaning` is a faithful synthesis without hallucinated plot.
+
 ---
 
 ## Output Contract: Review Directives

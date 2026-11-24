@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import atexit
 import copy
+import json
 import os
 import subprocess
 import sys
@@ -2804,7 +2805,21 @@ class GrammarSidecarV2Tests(unittest.TestCase):
                 str(work),
             )
 
-            # 2. Scaffold draft CLI
+            # 2. Write blocks-plan.json (mandatory input from lyrics-translator)
+            (work / "blocks-plan.json").write_text(
+                json.dumps(
+                    {
+                        "blocks": [
+                            {"lines": [1, 2, 3], "meaning": "你给我的那个小小的约定，直到如今我还深刻记着。"},
+                            {"lines": [4], "meaning": "那是你曾经给我的约定。"},
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            # Scaffold draft CLI
             self.run_cli(
                 str(scripts / "scaffold_draft.py"),
                 str(work),
@@ -2870,6 +2885,81 @@ class GrammarSidecarV2Tests(unittest.TestCase):
                 "--learner-language",
                 "zh-CN",
             )
+
+    def test_scaffold_draft_with_blocks_plan_custom_meaning(self) -> None:
+        scripts = SKILL_ROOT / "scripts"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            source = base / "plan-source.lrc"
+            source.write_bytes(JA_SOURCE_LRC.read_bytes())
+            accepted = base / "accepted.lrc"
+            accepted.write_bytes(JA_TRANSLATED_LRC.read_bytes())
+            work = base / "plan-source.grammar-work"
+            projection_path = work / "source-projection.json"
+
+            self.run_cli(
+                str(scripts / "project_source.py"),
+                str(source),
+                "--song-id",
+                "Fixture - Japanese Promise",
+            )
+            self.run_cli(
+                str(scripts / "verify_translation.py"),
+                str(projection_path),
+                str(accepted),
+                "--workdir",
+                str(work),
+            )
+
+            # Write a custom blocks-plan.json
+            plan_file = work / "blocks-plan.json"
+            plan_data = {
+                "blocks": [
+                    {"lines": [1, 2], "meaning": "第一乐段自定义自然意译。"},
+                    {"lines": [3, 4], "meaning": "第二乐段自定义自然意译。"},
+                ]
+            }
+            plan_file.write_text(json.dumps(plan_data, ensure_ascii=False), encoding="utf-8")
+
+            # Run scaffold_draft.py (should auto-pick up blocks-plan.json in workdir)
+            self.run_cli(
+                str(scripts / "scaffold_draft.py"),
+                str(work),
+                "--learner-language",
+                "zh-CN",
+            )
+            draft = read_json(work / "semantic-draft.json")
+            self.assertEqual(len(draft["blocks"]), 2)
+            self.assertEqual(draft["meaningUnits"][0]["text"], "第一乐段自定义自然意译。")
+            self.assertEqual(draft["meaningUnits"][1]["text"], "第二乐段自定义自然意译。")
+
+    def test_scaffold_draft_fails_without_blocks_plan(self) -> None:
+        scripts = SKILL_ROOT / "scripts"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            source = base / "no-plan.lrc"
+            source.write_bytes(JA_SOURCE_LRC.read_bytes())
+            work = base / "no-plan.grammar-work"
+
+            self.run_cli(
+                str(scripts / "project_source.py"),
+                str(source),
+                "--song-id",
+                "Fixture - Japanese Promise",
+            )
+
+            res = subprocess.run(
+                [
+                    sys.executable,
+                    str(scripts / "scaffold_draft.py"),
+                    str(work),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("missing_blocks_plan", res.stderr)
 
 
 

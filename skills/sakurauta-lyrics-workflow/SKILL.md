@@ -20,7 +20,6 @@ Translation is optional when the LRC is already an accepted bilingual file. It i
 ## Inputs
 
 - local source `.lrc`;
-- an accepted bilingual `.lrc` (optional; if absent, Phase 1 translation is required);
 - target learner language, for example `zh-CN`;
 - SakuraUta `songId` (default: LRC basename without `.lrc`).
 
@@ -29,17 +28,6 @@ Work directory: `<song>.grammar-work` beside the source.
 Quote all file paths in PowerShell commands (especially when titles contain special characters like semicolons `;`, ampersands `&`, dollars `$`, or apostrophes `'`).
 
 Reject video, subtitle, remote, non-LRC, network-share, and symlinked inputs.
-
-## Grammar-only Mode
-
-Use this mode when the user only wants a grammar Sidecar and already has an accepted bilingual LRC:
-
-1. Skip the translation child entirely.
-2. Start at `project_source.py` on the existing `<song>.lrc`.
-3. Freeze the accepted bilingual LRC with `verify_translation.py` (pass the alternate path if needed).
-4. Continue with grammar analysis, audit, and finalize.
-
-If the LRC is source-only, stop with `ERROR [translation-required]` and ask for a translation. Do not invent learner-facing meaning from source-only lyrics.
 
 ## Isolation Gate
 
@@ -55,7 +43,7 @@ Never fall back to inline translation, grammar analysis, or self-audit.
 
 ## Phase 1: Translate and Freeze
 
-Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is not already bilingual and accepted:
+Execute the Adversarial 3-Stage Translation Pipeline via `lyrics-translator` to produce both the bilingual translation and the mandatory `<workdir>\blocks-plan.json`:
 
 1. **Step 1: Strip Timestamps**:
 
@@ -69,8 +57,10 @@ Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is n
 
    ```text
    Read and follow <skills>\lyrics-translator\roles\translator.md and its referenced linguistic profiles in <skills>\lyrics-translator\reference\.
-   Translate the working file <song>.tmp.txt into <target learner language>.
-   Output ONLY the Song Persona and Theme handover memo upon completion.
+   Translate the working file <song>.tmp.txt into <target learner language> using Dual-Track Mode:
+   - Track 1: Write strictly time-aligned line-by-line translation to <song>.tmp.txt without inverting cross-line word order.
+   - Track 2: Record natural semantic stanza groups and fluent literary meanings into <workdir>\blocks-plan.json (or the Handover Memo) for downstream sidecar synthesis.
+   Output ONLY the Song Persona, Theme, and blocks plan handover memo upon completion.
    Do NOT dump or print the full translated lyrics in your response (the disk file is authoritative).
    Do not produce grammar JSON.
    ```
@@ -79,11 +69,12 @@ Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is n
 
    ```text
    Read and follow <skills>\lyrics-translator\roles\reviewer.md.
-   Audit the draft translation in <song>.tmp.txt against the original source lyrics and the translator's Song Persona handover memo.
+   Audit the draft translation in <song>.tmp.txt and stanza segmentation in <workdir>\blocks-plan.json against original source lyrics and translator's Handover Memo.
    Execute the Adversarial Falsification Protocol:
    - Identify dictionary first-sense traps (e.g., polysemous idioms or rhetorical phrases translated literally).
    - Identify contextual contradictions (emotional or causal breaks with surrounding lines).
    - Identify register collapse or narrative persona drift.
+   - Audit stanza boundaries: ensure mid-sentence enjambments are never severed across blocks.
    - Enforce red lines (no plot injection, length within cap, metadata immunity).
    Output your structured critique report according to roles\reviewer.md.
    ```
@@ -91,6 +82,7 @@ Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is n
 4. **Step 4: Arbiter & Deterministic Merge (Stage 3)**:
    - Mandatorily adopt all critical defect fixes identified by the Reviewer child; arbitrate stylistic suggestions against the Song Persona.
    - Apply polished lines to `<song>.tmp.txt` in a single write pass or script execution (avoid multi-turn single-line edit calls).
+   - If `<workdir>\blocks-plan.json` is used, commit the audited stanza boundaries and meanings to `<workdir>\blocks-plan.json`.
    - Run the deterministic merge script:
      ```powershell
      python <translator-skill>\scripts\lrc_merge.py "<song.lrc>" "<song>.tmp.txt"
@@ -121,7 +113,7 @@ Execute the Adversarial 3-Stage Translation Pipeline only when `<song.lrc>` is n
 
 ```text
 Read and follow <grammar-skill>\SKILL.md and <grammar-skill>\references\draft-contract.md.
-Step 1: Run scaffold_draft.py to generate the initial compliant draft with lines, monotonic blocks, pre-synthesized meanings, and repetitions:
+Step 1: Run scaffold_draft.py to generate the initial compliant draft with lines, monotonic blocks, pre-synthesized meanings, and repetitions (mandatorily adopts <workdir>\blocks-plan.json):
   python scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions
 Step 2: Enrich the draft by adding educational phrases and grammarNotes with translations and explanations.
 Step 3: Run resolve_spans.py to automatically compute and fix code-point spans:

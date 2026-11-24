@@ -38,11 +38,12 @@ Perform a final rhythm and singability check on the revised text:
    - Translated line 1
    - Source line 2
    - Translated line 2
-2. Execute the deterministic merge script:
+2. Adopt any stanza boundary fixes from the Reviewer and write the finalized, audited plan to `<workdir>/blocks-plan.json`.
+3. Execute the deterministic merge script:
    ```powershell
    python scripts/lrc_merge.py "<original.lrc>" "<working.tmp.txt>"
    ```
-3. Verify that the script outputs `[OK]`.
+4. Verify that the script outputs `[OK]`.
    - **No-Read Principle**: Do NOT re-read the merged `.lrc` file manually. `lrc_merge.py`'s exit code 0 and `[OK]` status provide 100% mathematical guarantee of timestamp validity, line count match, and metadata immunity.
 
 ---

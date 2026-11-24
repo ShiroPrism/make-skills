@@ -36,9 +36,8 @@ Only `finalize.py` writes the production sibling `<song>.json`.
 
 Reject video, subtitle, remote, network-share, non-LRC, and symlinked source inputs.
 
-## Grammar-only and Distribution
+## Distribution
 
-- If `<song>.lrc` already contains an accepted translation, skip the translation child and start at source projection. If no accepted bilingual LRC exists, stop and ask for translation; do not invent learner-facing meaning from source-only lyrics.
 - The production `<song>.json` is self-contained. A recipient only needs a sibling LRC whose NFC source text order matches the analyzed source. Timestamps may differ; the App re-anchors by text. Translation rows and `.grammar-work` are not required for distribution.
 - Keep `source.lrcProjectionHash` as exact/provenance metadata. It is not the consumer's availability gate.
 
@@ -57,7 +56,7 @@ The grammar projection keeps timed title/artist header rows (for example `[00:00
 
 ## 2. Freeze the Accepted Translation
 
-When translation is needed, it is produced by the unchanged `lyrics-translator` Skill on `<song.lrc>`. If an accepted bilingual LRC already exists, freeze that path directly. After the user accepts it:
+Every song requires translation and semantic planning produced by the `lyrics-translator` Skill on `<song.lrc>` in Dual-Track Mode, generating both `<song.lrc>` and `<workdir>\blocks-plan.json`. After user acceptance:
 
 ```powershell
 python scripts\verify_translation.py `
@@ -84,13 +83,15 @@ The grammar child authors only `semantic-draft.json` following this fast, token-
 
 ### Step 3.1: Scaffolding the Baseline Draft
 
-Run `scripts\scaffold_draft.py` to automatically scaffold a Schema v2 compliant initial draft with lines, monotonic blocks, pre-synthesized meanings from `translated.lrc`, and exact repetition groups:
+Run `scripts\scaffold_draft.py` to automatically scaffold a Schema v2 compliant initial draft with lines, monotonic blocks, agent-authored stanza meanings, and exact repetition groups:
 
 ```powershell
 python scripts\scaffold_draft.py "<workdir>" `
   --learner-language "<learner language>" `
   --auto-repetitions
 ```
+
+`scaffold_draft.py` strictly requires `<workdir>\blocks-plan.json` (produced by `lyrics-translator` in Dual-Track Mode). It maps the LLM's natural stanza boundaries and literary meanings directly into `blocks` and `meaningUnits`, eliminating mechanical string concatenation and ensuring mid-sentence enjambments are never cut.
 
 This deterministic tool creates all baseline lines and blocks, aligns translation text, and discovers repetition candidates. **Agents must not hand-author 2,000+ lines of structural JSON or reverse-engineer internal python scripts (`v2lib.py`, `sidecarlib.py`, etc.).**
 

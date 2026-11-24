@@ -21,8 +21,8 @@ semantic-draft.json (scaffold_draft.py -> enrich phrases/notes -> resolve_spans.
 
 The grammar child must follow the 3-step single-pass authoring workflow:
 
-1. **Scaffold**: Run `python scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions` to generate a 100% Schema v2 compliant initial draft with lines, blocks, synthesized meanings, and repetition groups pre-filled.
-2. **Enrich**: Add educational `phrases` and `grammarNotes` with clear learner-facing explanations and translations.
+1. **Scaffold**: Run `python scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions` to generate a 100% Schema v2 compliant initial draft with lines, blocks, agent-authored stanza meanings, and repetition groups pre-filled. `scaffold_draft.py` strictly requires `<workdir>\blocks-plan.json` (produced by `lyrics-translator` in Dual-Track Mode) to adopt the LLM's natural stanza boundaries and fluent sentence-level meanings.
+2. **Enrich**: Add educational `phrases` and `grammarNotes` with clear learner-facing explanations and translations. If needed, authors may also fine-tune `lineIds` in `blocks` to adjust enjambment boundaries.
 3. **Resolve Spans & Validate**: Run `python scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --in-place` followed by `python scripts\validate.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --learner-language "<target>"`.
 
 Agents must not inspect or read internal library scripts (`v2lib.py`, `sidecarlib.py`, etc.), dump full files into context, or author structural lines/blocks manually.

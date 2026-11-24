@@ -9,6 +9,7 @@ and millions of tokens previously wasted by subagents manually reconstructing JS
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -17,7 +18,6 @@ from sidecarlib import (
     SidecarError,
     configure_utf8_stdio,
     load_projection,
-    parse_lrc_rows,
     write_json_atomic,
 )
 from resolve_spans import resolve_draft_spans
@@ -39,29 +39,110 @@ def detect_language(text: str) -> str:
     return "en"
 
 
+def load_blocks_plan(
+    plan_path: Path,
+    learning_lines: list[dict],
+) -> list[tuple[list[dict], str]]:
+    """Parse blocks-plan.json into list of (b_lines, custom_meaning)."""
+    try:
+        data = json.loads(plan_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise SidecarError("invalid_blocks_plan", f"Failed to parse blocks plan: {exc}")
+
+    raw_blocks = data.get("blocks", data) if isinstance(data, dict) else data
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        raise SidecarError("invalid_blocks_plan", "Blocks plan must contain a non-empty 'blocks' list.")
+
+    lines_by_id = {l["lineId"]: l for l in learning_lines}
+    lines_by_order = {l["sourceOrder"]: l for l in learning_lines}
+    lines_by_1based = {i + 1: l for i, l in enumerate(learning_lines)}
+
+    result: list[tuple[list[dict], str | None]] = []
+    used_line_ids: set[str] = set()
+
+    for b_idx, item in enumerate(raw_blocks):
+        if isinstance(item, dict):
+            specs = item.get("lines", [])
+            custom_meaning = item.get("meaning") or item.get("text") or item.get("meaning_text")
+        elif isinstance(item, list):
+            specs = item
+            custom_meaning = None
+        else:
+            raise SidecarError("invalid_blocks_plan", f"Block item {b_idx} must be a dict or list.")
+
+        if not specs:
+            continue
+
+        resolved_lines: list[dict] = []
+        for s in specs:
+            if isinstance(s, int):
+                if s in lines_by_1based and not (0 in lines_by_order and s == 0):
+                    l = lines_by_1based.get(s) or lines_by_order.get(s)
+                else:
+                    l = lines_by_order.get(s) or lines_by_1based.get(s)
+                if l is None:
+                    raise SidecarError("invalid_blocks_plan", f"Block {b_idx}: line index {s} not found.")
+                resolved_lines.append(l)
+            elif isinstance(s, str):
+                s_strip = s.strip()
+                if s_strip in lines_by_id:
+                    resolved_lines.append(lines_by_id[s_strip])
+                elif "-" in s_strip and re.match(r"^\d+\s*-\s*\d+$", s_strip):
+                    start_str, end_str = s_strip.split("-")
+                    start_n, end_n = int(start_str.strip()), int(end_str.strip())
+                    for n in range(start_n, end_n + 1):
+                        l = lines_by_1based.get(n) or lines_by_order.get(n)
+                        if l is None:
+                            raise SidecarError("invalid_blocks_plan", f"Block {b_idx}: line range {s_strip} index {n} not found.")
+                        resolved_lines.append(l)
+                elif s_strip.isdigit():
+                    n = int(s_strip)
+                    l = lines_by_1based.get(n) or lines_by_order.get(n)
+                    if l is None:
+                        raise SidecarError("invalid_blocks_plan", f"Block {b_idx}: line number {n} not found.")
+                    resolved_lines.append(l)
+                else:
+                    raise SidecarError("invalid_blocks_plan", f"Block {b_idx}: unrecognized line spec {s!r}")
+
+        if not resolved_lines:
+            continue
+
+        resolved_lines.sort(key=lambda x: x["sourceOrder"])
+        for l in resolved_lines:
+            if l["lineId"] in used_line_ids:
+                raise SidecarError("invalid_blocks_plan", f"Line {l['lineId']} ({l['text']}) used in multiple blocks.")
+            used_line_ids.add(l["lineId"])
+        if not custom_meaning or not str(custom_meaning).strip():
+            raise SidecarError(
+                "invalid_blocks_plan",
+                f"Block {b_idx} must specify a non-empty literary 'meaning'.",
+            )
+        result.append((resolved_lines, str(custom_meaning).strip()))
+
+    missing = [l for l in learning_lines if l["lineId"] not in used_line_ids]
+    if missing:
+        missing_preview = ", ".join(repr(l["text"]) for l in missing[:3])
+        raise SidecarError(
+            "invalid_blocks_plan",
+            f"Blocks plan missed {len(missing)} line(s): {missing_preview}. Every non-metadata source line must belong to exactly one block.",
+        )
+
+    return result
+
+
 def scaffold_draft_document(
     workdir: Path,
     projection_path: Path,
     translated_lrc_path: Path | None = None,
     learner_language: str = "zh-CN",
     auto_discover_repetitions: bool = False,
+    blocks_plan_path: Path | None = None,
 ) -> tuple[dict, list]:
     """Build a Schema v2 compliant initial semantic draft."""
     if not projection_path.is_file():
         raise SidecarError("file_not_found", f"Projection file not found: {projection_path}")
 
     projection = load_projection(projection_path)
-
-    trans_map: dict[int, str] = {}
-    if translated_lrc_path and translated_lrc_path.is_file():
-        rows = parse_lrc_rows(translated_lrc_path)
-        seen_times: set[int] = set()
-        for r in rows:
-            t = r.timestamps[0] if r.timestamps else 0
-            if t not in seen_times:
-                seen_times.add(t)
-            else:
-                trans_map[t] = r.text
 
     lines: list[dict] = []
     source_langs: set[str] = set()
@@ -90,10 +171,14 @@ def scaffold_draft_document(
         first = lines[0]
         first_text_lower = first["text"].lower()
         is_meta = (
-            first["timeMs"] <= 1000
-            or first.get("role") == "metadata"
-            or " - " in first["text"]
-            or any(kw in first_text_lower for kw in ["lyrics by", "composed by", "written by", "produced by"])
+            first.get("role") == "metadata"
+            or (
+                first["timeMs"] == 0
+                and (
+                    " - " in first["text"]
+                    or any(kw in first_text_lower for kw in ["lyrics by", "composed by", "written by", "produced by", "作词", "作詞", "作曲", "编曲", "編曲", "演唱", "artist", "title"])
+                )
+            )
         )
         if is_meta:
             meta_line = first
@@ -132,11 +217,11 @@ def scaffold_draft_document(
             meaning_units.append(mu_meta)
             start_idx = 1
 
-    curr_block_lines: list[dict] = []
+    learning_lines = lines[start_idx:]
     block_counter = 1
     line_sig_to_mu: dict[tuple[str, ...], dict] = {}
 
-    def make_block(b_lines: list[dict], counter: int) -> dict:
+    def make_block(b_lines: list[dict], counter: int, custom_meaning: str | None = None) -> dict:
         bid = f"b_{counter:02d}"
         muo_id = f"muo_{bid}"
 
@@ -160,13 +245,9 @@ def scaffold_draft_document(
             })
         else:
             mu_id = f"mu_{bid}"
-            trans_texts = []
-            for l in b_lines:
-                t_text = trans_map.get(l["timeMs"], "").strip()
-                if t_text:
-                    t_text = re.sub(r"[，。！？；、,.!?]+$", "", t_text)
-                    trans_texts.append(t_text)
-            synth_text = "，".join(trans_texts) + "。" if trans_texts else "乐句表达。"
+            synth_text = custom_meaning.strip()
+            if not re.search(r"[。！？!?…]$", synth_text):
+                synth_text += "。"
 
             mu = {
                 "meaningUnitId": mu_id,
@@ -197,18 +278,24 @@ def scaffold_draft_document(
         }
         return b
 
-    for i in range(start_idx, len(lines)):
-        l = lines[i]
-        if curr_block_lines:
-            gap = l["timeMs"] - curr_block_lines[-1]["timeMs"]
-            if gap >= 4500 or len(curr_block_lines) >= 6:
-                blocks.append(make_block(curr_block_lines, block_counter))
-                block_counter += 1
-                curr_block_lines = []
-        curr_block_lines.append(l)
+    effective_plan = blocks_plan_path
+    if effective_plan is None and workdir:
+        cand_plan = workdir / "blocks-plan.json"
+        if cand_plan.is_file():
+            effective_plan = cand_plan
 
-    if curr_block_lines:
-        blocks.append(make_block(curr_block_lines, block_counter))
+    if not effective_plan or not effective_plan.is_file():
+        expected_path = effective_plan or (workdir / "blocks-plan.json" if workdir else Path("blocks-plan.json"))
+        raise SidecarError(
+            "missing_blocks_plan",
+            f"blocks-plan.json is required ({expected_path} not found). "
+            f"Every song must be processed via lyrics-translator (Dual-Track Mode) to produce blocks-plan.json with LLM-partitioned semantic stanzas and fluent meanings."
+        )
+
+    plan_groups = load_blocks_plan(effective_plan, learning_lines)
+    for b_lines, custom_meaning in plan_groups:
+        blocks.append(make_block(b_lines, block_counter, custom_meaning=custom_meaning))
+        block_counter += 1
 
     # Refine block end times
     for i in range(len(blocks) - 1):
@@ -289,6 +376,11 @@ def main() -> int:
         action="store_true",
         help="Pre-populate repetition groups via discovery",
     )
+    parser.add_argument(
+        "--blocks-plan",
+        type=Path,
+        help="Path to blocks-plan.json (default: <workdir>/blocks-plan.json; required)",
+    )
     args = parser.parse_args()
 
     try:
@@ -317,12 +409,15 @@ def main() -> int:
         if output_path.exists() and not args.replace:
             raise SidecarError("output_exists", f"Output already exists (use --replace): {output_path}")
 
+        blocks_plan = args.blocks_plan.expanduser().resolve() if args.blocks_plan else None
+
         draft, issues = scaffold_draft_document(
             workdir=workdir,
             projection_path=proj_path,
             translated_lrc_path=translated_lrc if translated_lrc.exists() else None,
             learner_language=args.learner_language,
             auto_discover_repetitions=args.auto_repetitions,
+            blocks_plan_path=blocks_plan,
         )
 
         write_json_atomic(output_path, draft, replace=args.replace)

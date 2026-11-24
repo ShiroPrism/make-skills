@@ -43,14 +43,27 @@ Load the relevant reference files:
 
 ---
 
-### Step 4: Line-by-Line Draft Output
+### Step 4: Line-by-Line Draft Output (Dual-Track Mode)
 
-1. Translate the entire song line by line directly into the working file (`.tmp.txt`).
-2. Adhere strictly to the line-matching contract:
-   - Exactly one translated line inserted below each source line.
+1. **Track 1 (Line-level LRC text)**: Translate the entire song line by line directly into the working file (`.tmp.txt`).
+   - Adhere strictly to the line-matching contract: exactly one translated line inserted below each source line.
+   - Respect enjambment pauses and audio sync: do not invert SVO/SOV word order across timestamps (e.g. do not move the main verb from line 2 to line 1 if the singer only sings it at line 2).
    - Metadata tags (`[ti:]`, `[ar:]`, etc.) and credits (`词：`, `曲：`) pass through untouched.
    - Pure vocal fillers (`oh oh`, `la la la`, `あーあー`) and sound effects (`♪`) pass through untouched.
    - Single line length must remain within target cap (4–16 Chinese characters; absolute maximum 18).
+2. **Track 2 (Stanza-level Semantic Chunking & Meaning Plan — Mandatory)**:
+   - Record the semantic block plan into `<workdir>/blocks-plan.json` (and include the summary in the Handover Memo):
+     ```json
+     {
+       "blocks": [
+         {
+           "lines": [1, 2, 3],
+           "meaning": "该乐段连贯优美的整段自然意译..."
+         }
+       ]
+     }
+     ```
+   - Each block groups consecutive lines forming a complete musical/semantic stanza (Verse, Chorus hook, Bridge, Outro), providing a natural, fluent sentence-level meaning for learners.
 
 ---
 
