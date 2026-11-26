@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-generate a Schema v2 semantic-draft.json skeleton from source projection and frozen translated LRC.
-
-This deterministic tool creates the complete baseline lines, monotonic blocks, and initial
-meaning units synthesized from the frozen translated.lrc. It eliminates hundreds of turns
-and millions of tokens previously wasted by subagents manually reconstructing JSON structure.
-"""
+"""Pre-generate a Schema v3 semantic-draft.json skeleton from bilingual-lyrics.json and blocks-plan.json."""
 
 from __future__ import annotations
 
@@ -14,27 +9,29 @@ import re
 import sys
 from pathlib import Path
 
+from resolve_spans import resolve_draft_spans
 from sidecarlib import (
+    SIDECAR_SCHEMA_ID,
+    SCHEMA_VERSION,
     SidecarError,
     configure_utf8_stdio,
-    load_projection,
+    load_bilingual_lyrics,
     write_json_atomic,
 )
-from resolve_spans import resolve_draft_spans
-from v2lib import (
+from v3lib import (
     candidate_groups,
     discover_repetition_candidates,
-    validate_grammar_analysis_v2,
+    validate_grammar_analysis_v3,
 )
 
 
 def detect_language(text: str) -> str:
     """Detect coarse language code for code-point spans."""
-    if re.search(r"[\u3040-\u30ff]", text):  # Hiragana or Katakana
+    if re.search(r"[\u3040-\u30ff]", text):
         return "ja"
-    if re.search(r"[\uac00-\ud7af]", text):  # Hangul
+    if re.search(r"[\uac00-\ud7af]", text):
         return "ko"
-    if re.search(r"[\u4e00-\u9fff]", text):  # CJK Ideographs
+    if re.search(r"[\u4e00-\u9fff]", text):
         return "zh"
     return "en"
 
@@ -43,7 +40,7 @@ def load_blocks_plan(
     plan_path: Path,
     learning_lines: list[dict],
 ) -> list[tuple[list[dict], str]]:
-    """Parse blocks-plan.json into list of (b_lines, custom_meaning)."""
+    """Parse blocks-plan.json into list of (block_lines, custom_meaning)."""
     try:
         data = json.loads(plan_path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -57,7 +54,7 @@ def load_blocks_plan(
     lines_by_order = {l["sourceOrder"]: l for l in learning_lines}
     lines_by_1based = {i + 1: l for i, l in enumerate(learning_lines)}
 
-    result: list[tuple[list[dict], str | None]] = []
+    result: list[tuple[list[dict], str]] = []
     used_line_ids: set[str] = set()
 
     for b_idx, item in enumerate(raw_blocks):
@@ -87,13 +84,32 @@ def load_blocks_plan(
                 s_strip = s.strip()
                 if s_strip in lines_by_id:
                     resolved_lines.append(lines_by_id[s_strip])
+                elif re.match(r"^l_\d+\s*-\s*l_\d+$", s_strip):
+                    start_id, end_id = [p.strip() for p in s_strip.split("-", 1)]
+                    if start_id not in lines_by_id or end_id not in lines_by_id:
+                        raise SidecarError(
+                            "invalid_blocks_plan",
+                            f"Block {b_idx}: lineId range {s_strip} out of bounds.",
+                        )
+                    start_ord = lines_by_id[start_id]["sourceOrder"]
+                    end_ord = lines_by_id[end_id]["sourceOrder"]
+                    if end_ord < start_ord:
+                        raise SidecarError(
+                            "invalid_blocks_plan",
+                            f"Block {b_idx}: reversed lineId range {s_strip}.",
+                        )
+                    for ord_idx in range(start_ord, end_ord + 1):
+                        resolved_lines.append(lines_by_order[ord_idx])
                 elif "-" in s_strip and re.match(r"^\d+\s*-\s*\d+$", s_strip):
                     start_str, end_str = s_strip.split("-")
                     start_n, end_n = int(start_str.strip()), int(end_str.strip())
                     for n in range(start_n, end_n + 1):
                         l = lines_by_1based.get(n) or lines_by_order.get(n)
                         if l is None:
-                            raise SidecarError("invalid_blocks_plan", f"Block {b_idx}: line range {s_strip} index {n} not found.")
+                            raise SidecarError(
+                                "invalid_blocks_plan",
+                                f"Block {b_idx}: line range {s_strip} index {n} not found.",
+                            )
                         resolved_lines.append(l)
                 elif s_strip.isdigit():
                     n = int(s_strip)
@@ -124,7 +140,7 @@ def load_blocks_plan(
         missing_preview = ", ".join(repr(l["text"]) for l in missing[:3])
         raise SidecarError(
             "invalid_blocks_plan",
-            f"Blocks plan missed {len(missing)} line(s): {missing_preview}. Every non-metadata source line must belong to exactly one block.",
+            f"Blocks plan missed {len(missing)} line(s): {missing_preview}. Every lyric line must belong to a block.",
         )
 
     return result
@@ -132,99 +148,56 @@ def load_blocks_plan(
 
 def scaffold_draft_document(
     workdir: Path,
-    projection_path: Path,
-    translated_lrc_path: Path | None = None,
+    bilingual_path: Path,
     learner_language: str = "zh-CN",
     auto_discover_repetitions: bool = False,
     blocks_plan_path: Path | None = None,
 ) -> tuple[dict, list]:
-    """Build a Schema v2 compliant initial semantic draft."""
-    if not projection_path.is_file():
-        raise SidecarError("file_not_found", f"Projection file not found: {projection_path}")
+    """Build a Schema v3 compliant initial semantic draft (pure content, zero timestamps)."""
+    if not bilingual_path.is_file():
+        raise SidecarError("file_not_found", f"Bilingual lyrics file not found: {bilingual_path}")
 
-    projection = load_projection(projection_path)
+    bilingual = load_bilingual_lyrics(bilingual_path)
 
     lines: list[dict] = []
     source_langs: set[str] = set()
-    for l in projection["lines"]:
+    for l in bilingual["lines"]:
         text = l["text"]
-        lang = l.get("language") or detect_language(text)
+        lang = detect_language(text)
         source_langs.add(lang)
-        line_obj = {
-            "lineId": l["lineId"],
-            "sourceOrder": l["sourceOrder"],
-            "timeMs": l["timeMs"],
-            "text": text,
-            "fingerprint": l["fingerprint"],
-            "role": "text",
-            "language": lang,
-            "languageSpans": [{"start": 0, "end": len(text), "language": lang}],
-        }
-        lines.append(line_obj)
+        lines.append(
+            {
+                "lineId": l["lineId"],
+                "sourceOrder": l["sourceOrder"],
+                "text": text,
+                "fingerprint": l["fingerprint"],
+                "role": "text",
+                "language": lang,
+                "languageSpans": [{"start": 0, "end": len(text), "language": lang}],
+            }
+        )
+
+    effective_plan = blocks_plan_path
+    if effective_plan is None and workdir:
+        cand_plan = workdir / "blocks-plan.json"
+        if cand_plan.is_file():
+            effective_plan = cand_plan
+
+    if not effective_plan or not effective_plan.is_file():
+        expected_path = effective_plan or (workdir / "blocks-plan.json" if workdir else Path("blocks-plan.json"))
+        raise SidecarError(
+            "missing_blocks_plan",
+            f"blocks-plan.json is required ({expected_path} not found). "
+            f"Generate blocks-plan.json from bilingual-lyrics.json (or via lyrics-translator Dual-Track Mode) before scaffolding.",
+        )
 
     blocks: list[dict] = []
     meaning_units: list[dict] = []
-
-    # Check for metadata line(s) at start (Title, Artist, Credits)
-    start_idx = 0
-    if len(lines) > 0:
-        first = lines[0]
-        first_text_lower = first["text"].lower()
-        is_meta = (
-            first.get("role") == "metadata"
-            or (
-                first["timeMs"] == 0
-                and (
-                    " - " in first["text"]
-                    or any(kw in first_text_lower for kw in ["lyrics by", "composed by", "written by", "produced by", "作词", "作詞", "作曲", "编曲", "編曲", "演唱", "artist", "title"])
-                )
-            )
-        )
-        if is_meta:
-            meta_line = first
-            b_meta = {
-                "blockId": "b_meta",
-                "lineIds": [meta_line["lineId"]],
-                "startTimeMs": meta_line["timeMs"],
-                "endTimeMs": lines[1]["timeMs"] if len(lines) > 1 else meta_line["timeMs"] + 1000,
-                "meaning": {
-                    "parts": [{"meaningUnitOccurrenceId": "muo_meta"}]
-                },
-                "labels": [{"namespace": "discourse", "key": "metadata"}],
-                "confidence": 1.0,
-            }
-            mu_meta = {
-                "meaningUnitId": "mu_meta",
-                "text": "歌曲标题与演职员信息。",
-                "labels": [{"namespace": "discourse", "key": "metadata"}],
-                "confidence": 1.0,
-                "occurrences": [
-                    {
-                        "occurrenceId": "muo_meta",
-                        "blockId": "b_meta",
-                        "sourceSegments": [
-                            {
-                                "lineId": meta_line["lineId"],
-                                "start": 0,
-                                "end": len(meta_line["text"]),
-                                "text": meta_line["text"],
-                            }
-                        ],
-                    }
-                ],
-            }
-            blocks.append(b_meta)
-            meaning_units.append(mu_meta)
-            start_idx = 1
-
-    learning_lines = lines[start_idx:]
-    block_counter = 1
     line_sig_to_mu: dict[tuple[str, ...], dict] = {}
 
-    def make_block(b_lines: list[dict], counter: int, custom_meaning: str | None = None) -> dict:
+    def make_block(b_lines: list[dict], counter: int, custom_meaning: str) -> dict:
         bid = f"b_{counter:02d}"
         muo_id = f"muo_{bid}"
-
         b_lines_sig = tuple(l["text"] for l in b_lines)
         source_segs = [
             {
@@ -238,17 +211,18 @@ def scaffold_draft_document(
 
         if b_lines_sig in line_sig_to_mu:
             canonical_mu = line_sig_to_mu[b_lines_sig]
-            canonical_mu["occurrences"].append({
-                "occurrenceId": muo_id,
-                "blockId": bid,
-                "sourceSegments": source_segs,
-            })
+            canonical_mu["occurrences"].append(
+                {
+                    "occurrenceId": muo_id,
+                    "blockId": bid,
+                    "sourceSegments": source_segs,
+                }
+            )
         else:
             mu_id = f"mu_{bid}"
             synth_text = custom_meaning.strip()
             if not re.search(r"[。！？!?…]$", synth_text):
                 synth_text += "。"
-
             mu = {
                 "meaningUnitId": mu_id,
                 "text": synth_text,
@@ -265,53 +239,25 @@ def scaffold_draft_document(
             line_sig_to_mu[b_lines_sig] = mu
             meaning_units.append(mu)
 
-        b = {
+        return {
             "blockId": bid,
             "lineIds": [l["lineId"] for l in b_lines],
-            "startTimeMs": b_lines[0]["timeMs"],
-            "endTimeMs": b_lines[-1]["timeMs"] + 2000,
-            "meaning": {
-                "parts": [{"meaningUnitOccurrenceId": muo_id}]
-            },
+            "meaning": {"parts": [{"meaningUnitOccurrenceId": muo_id}]},
             "labels": [],
             "confidence": 0.95,
         }
-        return b
 
-    effective_plan = blocks_plan_path
-    if effective_plan is None and workdir:
-        cand_plan = workdir / "blocks-plan.json"
-        if cand_plan.is_file():
-            effective_plan = cand_plan
-
-    if not effective_plan or not effective_plan.is_file():
-        expected_path = effective_plan or (workdir / "blocks-plan.json" if workdir else Path("blocks-plan.json"))
-        raise SidecarError(
-            "missing_blocks_plan",
-            f"blocks-plan.json is required ({expected_path} not found). "
-            f"Every song must be processed via lyrics-translator (Dual-Track Mode) to produce blocks-plan.json with LLM-partitioned semantic stanzas and fluent meanings."
-        )
-
-    plan_groups = load_blocks_plan(effective_plan, learning_lines)
-    for b_lines, custom_meaning in plan_groups:
-        blocks.append(make_block(b_lines, block_counter, custom_meaning=custom_meaning))
-        block_counter += 1
-
-    # Refine block end times
-    for i in range(len(blocks) - 1):
-        next_start = blocks[i + 1]["startTimeMs"]
-        if blocks[i]["endTimeMs"] > next_start:
-            blocks[i]["endTimeMs"] = next_start
+    plan_groups = load_blocks_plan(effective_plan, lines)
+    for counter, (b_lines, custom_meaning) in enumerate(plan_groups, start=1):
+        blocks.append(make_block(b_lines, counter, custom_meaning))
 
     draft = {
-        "schema": "sakurauta.lyrics-grammar-analysis",
-        "schemaVersion": 2,
+        "schema": SIDECAR_SCHEMA_ID,
+        "schemaVersion": SCHEMA_VERSION,
         "source": {
-            "lrcFile": projection["lrcFile"],
-            "songId": projection["songId"],
             "sourceLanguages": sorted(source_langs) or ["en"],
             "lineCount": len(lines),
-            "lrcProjectionHash": projection["lrcProjectionHash"],
+            "contentHash": bilingual["contentHash"],
         },
         "lines": lines,
         "repetitionGroups": [],
@@ -326,35 +272,45 @@ def scaffold_draft_document(
         },
     }
 
-    resolve_draft_spans(draft, projection)
+    resolve_draft_spans(draft, bilingual)
 
     if auto_discover_repetitions:
-        candidates = discover_repetition_candidates(draft, projection, learner_language=learner_language)
+        candidates = discover_repetition_candidates(draft, bilingual, learner_language=learner_language)
         draft["repetitionGroups"] = candidate_groups(candidates)
 
-    issues = validate_grammar_analysis_v2(
+    issues = validate_grammar_analysis_v3(
         draft,
-        projection=projection,
-        expected_lrc_file=projection.get("lrcFile"),
+        bilingual=bilingual,
+        require_bilingual=True,
         learner_language=learner_language,
     )
     return draft, issues
 
 
+def _default_bilingual_path(workdir: Path) -> Path:
+    frozen = workdir / "bilingual-lyrics.frozen.json"
+    return frozen if frozen.is_file() else (workdir / "bilingual-lyrics.json")
+
+
 def main() -> int:
     configure_utf8_stdio()
     parser = argparse.ArgumentParser(
-        description="Scaffold a Schema v2 semantic-draft.json from source projection and translated LRC."
+        description="Scaffold a Schema v3 semantic-draft.json from bilingual-lyrics.json and blocks-plan.json."
     )
     parser.add_argument(
         "target",
         type=Path,
-        help="source-projection.json, workdir, or source LRC file",
+        help="workdir, bilingual-lyrics(.frozen).json, or source .lrc path (infers <stem>.grammar-work)",
     )
     parser.add_argument(
         "--workdir",
         type=Path,
         help="<song>.grammar-work directory",
+    )
+    parser.add_argument(
+        "--bilingual",
+        type=Path,
+        help="Path to bilingual-lyrics(.frozen).json",
     )
     parser.add_argument(
         "--learner-language",
@@ -386,58 +342,61 @@ def main() -> int:
     try:
         target = args.target.expanduser().resolve()
         workdir = args.workdir.expanduser().resolve() if args.workdir else None
+        bilingual_path = args.bilingual.expanduser().resolve() if args.bilingual else None
 
         if target.is_dir() or target.name.endswith(".grammar-work"):
             workdir = workdir or target
-            proj_path = workdir / "source-projection.json"
         elif target.suffix.lower() == ".lrc":
             workdir = workdir or (target.parent / f"{target.stem}.grammar-work").resolve()
-            proj_path = workdir / "source-projection.json"
-        elif target.name == "source-projection.json" or target.suffix.lower() == ".json":
-            proj_path = target
+        elif target.suffix.lower() == ".json":
+            bilingual_path = bilingual_path or target
             workdir = workdir or target.parent
         else:
             workdir = workdir or target
-            proj_path = workdir / "source-projection.json"
 
         if not workdir.exists():
             workdir.mkdir(parents=True, exist_ok=True)
+        if bilingual_path is None:
+            bilingual_path = _default_bilingual_path(workdir)
 
-        translated_lrc = workdir / "translated.lrc"
         output_path = args.output.expanduser().resolve() if args.output else workdir / "semantic-draft.json"
-
         if output_path.exists() and not args.replace:
             raise SidecarError("output_exists", f"Output already exists (use --replace): {output_path}")
 
         blocks_plan = args.blocks_plan.expanduser().resolve() if args.blocks_plan else None
-
         draft, issues = scaffold_draft_document(
             workdir=workdir,
-            projection_path=proj_path,
-            translated_lrc_path=translated_lrc if translated_lrc.exists() else None,
+            bilingual_path=bilingual_path,
             learner_language=args.learner_language,
             auto_discover_repetitions=args.auto_repetitions,
             blocks_plan_path=blocks_plan,
         )
 
         write_json_atomic(output_path, draft, replace=args.replace)
-        print(f"[OK] Scaffolded semantic-draft.json: {len(draft['lines'])} lines, {len(draft['blocks'])} blocks, {len(draft['meaningUnits'])} meaning units.")
+        print(
+            f"[OK] Scaffolded semantic-draft.json (v3): {len(draft['lines'])} lines, "
+            f"{len(draft['blocks'])} blocks, {len(draft['meaningUnits'])} meaning units."
+        )
         if issues:
             print(f"[WARN] Initial scaffold has {len(issues)} validation notices:")
             for issue in issues[:5]:
                 print(f"  - {issue.code}: {issue.message}")
         else:
-            print("[PASS] Initial scaffold passed 100% of Schema v2 validation rules.")
+            print("[PASS] Initial scaffold passed 100% of Schema v3 validation rules.")
 
-        # Print compact Block/Line ID Index so the grammar child does not need to read the full JSON
         line_by_id = {line["lineId"]: line for line in draft["lines"]}
         print("\n--- DRAFT INDEX (for enrichment.json) ---")
         for block in draft["blocks"]:
             bid = block["blockId"]
-            for lid in block.get("lineIds", []):
+            b_lids = block.get("lineIds", [])
+            if b_lids:
+                lid_range = f"{b_lids[0]}..{b_lids[-1]}" if len(b_lids) > 1 else b_lids[0]
+                print(f"[{bid}] {lid_range} ({len(b_lids)} line{'s' if len(b_lids) != 1 else ''})")
+            for lid in b_lids:
                 line_obj = line_by_id.get(lid)
                 if line_obj:
-                    print(f"[{bid}] {line_obj['sourceOrder'] + 1} | {lid} | {line_obj['text']}")
+                    cp_len = len(line_obj["text"])
+                    print(f"  {line_obj['sourceOrder'] + 1} | {lid} ({cp_len} cp) | {line_obj['text']}")
         if draft.get("repetitionGroups"):
             print("\n--- REPETITION GROUPS ---")
             for rep in draft["repetitionGroups"]:

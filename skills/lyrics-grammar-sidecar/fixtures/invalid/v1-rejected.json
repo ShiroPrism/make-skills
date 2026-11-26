@@ -1,0 +1,187 @@
+{
+  "blocks": [
+    {
+      "blockId": "b_fixture",
+      "confidence": 0.92,
+      "endTimeMs": 7000,
+      "labels": [],
+      "lineIds": [
+        "l_b9a7b78579cb568f",
+        "l_514ca07d16f17fd0",
+        "l_7420f4f661e24064",
+        "l_6886e9219b28383b"
+      ],
+      "meaning": {
+        "parts": [
+          {
+            "meaningUnitOccurrenceId": "muo_fixture"
+          }
+        ]
+      },
+      "startTimeMs": 1000
+    }
+  ],
+  "extensions": {
+    "learnerLanguage": "zh-CN"
+  },
+  "grammarNotes": [
+    {
+      "confidence": 0.8,
+      "explanation": "前两行构成跨行名词短语，后两行回到同一段回忆。",
+      "labels": [
+        {
+          "key": "fixture",
+          "namespace": "syntax"
+        }
+      ],
+      "noteId": "g_fixture",
+      "scope": {
+        "blockIds": [
+          "b_fixture"
+        ],
+        "phraseId": "p_fixture"
+      }
+    }
+  ],
+  "lines": [
+    {
+      "fingerprint": "sha256:dae84c24f232203e3b94c5e4003d00aba213e99e502d63f16b2215c116696644",
+      "language": "ja",
+      "lineId": "l_b9a7b78579cb568f",
+      "role": "text",
+      "sourceOrder": 0,
+      "text": "君がくれた",
+      "timeMs": 1000
+    },
+    {
+      "fingerprint": "sha256:5d719b27e9a9905177571d504990c78bc7aa7905be0897ebfca4d57f9e213f93",
+      "language": "ja",
+      "lineId": "l_514ca07d16f17fd0",
+      "role": "text",
+      "sourceOrder": 1,
+      "text": "小さな約束を",
+      "timeMs": 3000
+    },
+    {
+      "fingerprint": "sha256:4720420b4aee38e7311d7d079bd51846c89537ddf367d0c07c110347901d8473",
+      "language": "ja",
+      "lineId": "l_7420f4f661e24064",
+      "role": "text",
+      "sourceOrder": 2,
+      "text": "今でも覚えている",
+      "timeMs": 5000
+    },
+    {
+      "fingerprint": "sha256:dae84c24f232203e3b94c5e4003d00aba213e99e502d63f16b2215c116696644",
+      "language": "ja",
+      "lineId": "l_6886e9219b28383b",
+      "role": "text",
+      "sourceOrder": 3,
+      "text": "君がくれた",
+      "timeMs": 7000
+    }
+  ],
+  "meaningUnits": [
+    {
+      "confidence": 0.9,
+      "labels": [],
+      "meaningUnitId": "mu_fixture",
+      "occurrences": [
+        {
+          "blockId": "b_fixture",
+          "occurrenceId": "muo_fixture",
+          "sourceSegments": [
+            {
+              "end": 5,
+              "lineId": "l_b9a7b78579cb568f",
+              "start": 0,
+              "text": "君がくれた"
+            },
+            {
+              "end": 6,
+              "lineId": "l_514ca07d16f17fd0",
+              "start": 0,
+              "text": "小さな約束を"
+            },
+            {
+              "end": 8,
+              "lineId": "l_7420f4f661e24064",
+              "start": 0,
+              "text": "今でも覚えている"
+            },
+            {
+              "end": 5,
+              "lineId": "l_6886e9219b28383b",
+              "start": 0,
+              "text": "君がくれた"
+            }
+          ]
+        }
+      ],
+      "text": "你给我的那个小小约定，我至今仍记得。"
+    }
+  ],
+  "phrases": [
+    {
+      "confidence": 0.9,
+      "explanation": "前两行构成跨行名词短语，后两行回到同一段回忆。",
+      "gloss": "你给我的小小约定",
+      "kind": "phrase",
+      "labels": [
+        {
+          "key": "shared_occurrence",
+          "namespace": "syntax"
+        }
+      ],
+      "occurrences": [
+        {
+          "blockId": "b_fixture",
+          "occurrenceId": "po_fixture",
+          "sourceSegments": [
+            {
+              "end": 5,
+              "lineId": "l_b9a7b78579cb568f",
+              "start": 0,
+              "text": "君がくれた"
+            },
+            {
+              "end": 6,
+              "lineId": "l_514ca07d16f17fd0",
+              "start": 0,
+              "text": "小さな約束を"
+            },
+            {
+              "end": 8,
+              "lineId": "l_7420f4f661e24064",
+              "start": 0,
+              "text": "今でも覚えている"
+            },
+            {
+              "end": 5,
+              "lineId": "l_6886e9219b28383b",
+              "start": 0,
+              "text": "君がくれた"
+            }
+          ]
+        }
+      ],
+      "phraseId": "p_fixture",
+      "role": "shared_phrase",
+      "surface": "君がくれた小さな約束を今でも覚えている君がくれた"
+    }
+  ],
+  "relations": [],
+  "repetitionGroups": [],
+  "schema": "sakurauta.lyrics-grammar-analysis",
+  "schemaVersion": 1,
+  "source": {
+    "lineCount": 4,
+    "lrcFile": "source.lrc",
+    "lrcProjectionHash": "sha256:739e7c6dea9460df9da216db818e872aac4baf54159eb30e64c1957dff18fabd",
+    "songId": "Fixture - Japanese Promise",
+    "sourceLanguages": [
+      "ja"
+    ]
+  },
+  "uncertainties": []
+}

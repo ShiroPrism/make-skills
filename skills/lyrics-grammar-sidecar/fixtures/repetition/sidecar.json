@@ -3,12 +3,11 @@
     {
       "blockId": "b_repeat1",
       "confidence": 0.92,
-      "endTimeMs": 3000,
       "labels": [],
       "lineIds": [
-        "l_79c9e958d5587621",
-        "l_6090d33d01c7de38",
-        "l_9bb0df02b6e7055f"
+        "l_001",
+        "l_002",
+        "l_003"
       ],
       "meaning": {
         "parts": [
@@ -19,18 +18,16 @@
             "meaningUnitOccurrenceId": "muo_tail_base_1"
           }
         ]
-      },
-      "startTimeMs": 1000
+      }
     },
     {
       "blockId": "b_repeat2",
       "confidence": 0.92,
-      "endTimeMs": 6000,
       "labels": [],
       "lineIds": [
-        "l_d1caf9dbec649ef5",
-        "l_7e35c48f8fa4d296",
-        "l_240af5ae892e5f5b"
+        "l_004",
+        "l_005",
+        "l_006"
       ],
       "meaning": {
         "parts": [
@@ -45,18 +42,16 @@
             "textBefore": "然后"
           }
         ]
-      },
-      "startTimeMs": 4000
+      }
     },
     {
       "blockId": "b_repeat3",
       "confidence": 0.92,
-      "endTimeMs": 9000,
       "labels": [],
       "lineIds": [
-        "l_dfa7725af6754e17",
-        "l_4be7f19fa39b5d6e",
-        "l_12e01a3ef94990fc"
+        "l_007",
+        "l_008",
+        "l_009"
       ],
       "meaning": {
         "parts": [
@@ -68,8 +63,7 @@
             "textBefore": "接着"
           }
         ]
-      },
-      "startTimeMs": 7000
+      }
     }
   ],
   "extensions": {
@@ -100,83 +94,74 @@
     {
       "fingerprint": "sha256:1160992bb93500a18af7096e987ff286da5789802e21555cb9c545c1179860ce",
       "language": "ja",
-      "lineId": "l_79c9e958d5587621",
+      "lineId": "l_001",
       "role": "text",
       "sourceOrder": 0,
-      "text": "夜明けの歌を君と歌う",
-      "timeMs": 1000
+      "text": "夜明けの歌を君と歌う"
     },
     {
       "fingerprint": "sha256:36890807f2e9094cefee840fbe5d5ac47da20751d999b045900b308b91025234",
       "language": "ja",
-      "lineId": "l_6090d33d01c7de38",
+      "lineId": "l_002",
       "role": "text",
       "sourceOrder": 1,
-      "text": "同じ約束を胸に抱いて",
-      "timeMs": 2000
+      "text": "同じ約束を胸に抱いて"
     },
     {
       "fingerprint": "sha256:e59bf1641748d7237bc01bbed5261596ac46c9fb3264a451e889c2c0f4b2c314",
       "language": "ja",
-      "lineId": "l_9bb0df02b6e7055f",
+      "lineId": "l_003",
       "role": "text",
       "sourceOrder": 2,
-      "text": "この声が届くまで",
-      "timeMs": 3000
+      "text": "この声が届くまで"
     },
     {
       "fingerprint": "sha256:1160992bb93500a18af7096e987ff286da5789802e21555cb9c545c1179860ce",
       "language": "ja",
-      "lineId": "l_d1caf9dbec649ef5",
+      "lineId": "l_004",
       "role": "text",
       "sourceOrder": 3,
-      "text": "夜明けの歌を君と歌う",
-      "timeMs": 4000
+      "text": "夜明けの歌を君と歌う"
     },
     {
       "fingerprint": "sha256:36890807f2e9094cefee840fbe5d5ac47da20751d999b045900b308b91025234",
       "language": "ja",
-      "lineId": "l_7e35c48f8fa4d296",
+      "lineId": "l_005",
       "role": "text",
       "sourceOrder": 4,
-      "text": "同じ約束を胸に抱いて",
-      "timeMs": 5000
+      "text": "同じ約束を胸に抱いて"
     },
     {
       "fingerprint": "sha256:902f1c9bfa6494c9aebc1ea6576719e08424c6d7daba383470f07690b3227d50",
       "language": "ja",
-      "lineId": "l_240af5ae892e5f5b",
+      "lineId": "l_006",
       "role": "text",
       "sourceOrder": 5,
-      "text": "この声が届くまでもっと遠くへ",
-      "timeMs": 6000
+      "text": "この声が届くまでもっと遠くへ"
     },
     {
       "fingerprint": "sha256:1160992bb93500a18af7096e987ff286da5789802e21555cb9c545c1179860ce",
       "language": "ja",
-      "lineId": "l_dfa7725af6754e17",
+      "lineId": "l_007",
       "role": "text",
       "sourceOrder": 6,
-      "text": "夜明けの歌を君と歌う",
-      "timeMs": 7000
+      "text": "夜明けの歌を君と歌う"
     },
     {
       "fingerprint": "sha256:36890807f2e9094cefee840fbe5d5ac47da20751d999b045900b308b91025234",
       "language": "ja",
-      "lineId": "l_4be7f19fa39b5d6e",
+      "lineId": "l_008",
       "role": "text",
       "sourceOrder": 7,
-      "text": "同じ約束を胸に抱いて",
-      "timeMs": 8000
+      "text": "同じ約束を胸に抱いて"
     },
     {
       "fingerprint": "sha256:3263f63806dcf3499b4d4b8bd768fd346754d887659c34efb78f300fe04990eb",
       "language": "ja",
-      "lineId": "l_12e01a3ef94990fc",
+      "lineId": "l_009",
       "role": "text",
       "sourceOrder": 8,
-      "text": "新しい朝を迎えに行こう",
-      "timeMs": 9000
+      "text": "新しい朝を迎えに行こう"
     }
   ],
   "meaningUnits": [
@@ -191,13 +176,13 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_79c9e958d5587621",
+              "lineId": "l_001",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_6090d33d01c7de38",
+              "lineId": "l_002",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -209,13 +194,13 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_d1caf9dbec649ef5",
+              "lineId": "l_004",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_7e35c48f8fa4d296",
+              "lineId": "l_005",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -227,13 +212,13 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_dfa7725af6754e17",
+              "lineId": "l_007",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_4be7f19fa39b5d6e",
+              "lineId": "l_008",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -253,7 +238,7 @@
           "sourceSegments": [
             {
               "end": 8,
-              "lineId": "l_9bb0df02b6e7055f",
+              "lineId": "l_003",
               "start": 0,
               "text": "この声が届くまで"
             }
@@ -265,7 +250,7 @@
           "sourceSegments": [
             {
               "end": 8,
-              "lineId": "l_240af5ae892e5f5b",
+              "lineId": "l_006",
               "start": 0,
               "text": "この声が届くまで"
             }
@@ -285,7 +270,7 @@
           "sourceSegments": [
             {
               "end": 14,
-              "lineId": "l_240af5ae892e5f5b",
+              "lineId": "l_006",
               "start": 8,
               "text": "もっと遠くへ"
             }
@@ -305,7 +290,7 @@
           "sourceSegments": [
             {
               "end": 11,
-              "lineId": "l_12e01a3ef94990fc",
+              "lineId": "l_009",
               "start": 0,
               "text": "新しい朝を迎えに行こう"
             }
@@ -334,7 +319,7 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_79c9e958d5587621",
+              "lineId": "l_001",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             }
@@ -346,7 +331,7 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_d1caf9dbec649ef5",
+              "lineId": "l_004",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             }
@@ -362,7 +347,7 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_dfa7725af6754e17",
+              "lineId": "l_007",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             }
@@ -391,7 +376,7 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_6090d33d01c7de38",
+              "lineId": "l_002",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -403,7 +388,7 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_7e35c48f8fa4d296",
+              "lineId": "l_005",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -415,7 +400,7 @@
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_4be7f19fa39b5d6e",
+              "lineId": "l_008",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -448,17 +433,17 @@
       "occurrences": [
         {
           "blockId": "b_repeat1",
-          "occurrenceId": "repo_fdd755a81c3f1ba9",
+          "occurrenceId": "repo_187888a144b3d6e3",
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_79c9e958d5587621",
+              "lineId": "l_001",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_6090d33d01c7de38",
+              "lineId": "l_002",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -466,17 +451,17 @@
         },
         {
           "blockId": "b_repeat2",
-          "occurrenceId": "repo_4adb29c7dbd23178",
+          "occurrenceId": "repo_48c8ffbb191a5500",
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_d1caf9dbec649ef5",
+              "lineId": "l_004",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_7e35c48f8fa4d296",
+              "lineId": "l_005",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -484,17 +469,17 @@
         },
         {
           "blockId": "b_repeat3",
-          "occurrenceId": "repo_ae815dad1426e6aa",
+          "occurrenceId": "repo_d745db311e16ad2f",
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_dfa7725af6754e17",
+              "lineId": "l_007",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_4be7f19fa39b5d6e",
+              "lineId": "l_008",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             }
@@ -507,23 +492,23 @@
       "occurrences": [
         {
           "blockId": "b_repeat1",
-          "occurrenceId": "repo_1a7157c9174867b4",
+          "occurrenceId": "repo_3d799e7814de8303",
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_79c9e958d5587621",
+              "lineId": "l_001",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_6090d33d01c7de38",
+              "lineId": "l_002",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             },
             {
               "end": 8,
-              "lineId": "l_9bb0df02b6e7055f",
+              "lineId": "l_003",
               "start": 0,
               "text": "この声が届くまで"
             }
@@ -531,23 +516,23 @@
         },
         {
           "blockId": "b_repeat2",
-          "occurrenceId": "repo_cb5f9f54336a515f",
+          "occurrenceId": "repo_1e8aeb0432dd5d43",
           "sourceSegments": [
             {
               "end": 10,
-              "lineId": "l_d1caf9dbec649ef5",
+              "lineId": "l_004",
               "start": 0,
               "text": "夜明けの歌を君と歌う"
             },
             {
               "end": 10,
-              "lineId": "l_7e35c48f8fa4d296",
+              "lineId": "l_005",
               "start": 0,
               "text": "同じ約束を胸に抱いて"
             },
             {
               "end": 8,
-              "lineId": "l_240af5ae892e5f5b",
+              "lineId": "l_006",
               "start": 0,
               "text": "この声が届くまで"
             }
@@ -558,12 +543,10 @@
     }
   ],
   "schema": "sakurauta.lyrics-grammar-analysis",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "source": {
+    "contentHash": "sha256:225121414baccd834c6bf998538b13458f9ad99f63bb4d86adb8ecb4456e9c63",
     "lineCount": 9,
-    "lrcFile": "source.lrc",
-    "lrcProjectionHash": "sha256:b83ba56a5249f0785c5e9ec74859f31c22ac85718f75ee807cfab769364a4f3a",
-    "songId": "Fixture - Repetition Pattern",
     "sourceLanguages": [
       "ja"
     ]

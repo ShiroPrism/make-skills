@@ -3,11 +3,10 @@
     {
       "blockId": "b_fixture",
       "confidence": 0.92,
-      "endTimeMs": 8000,
       "labels": [],
       "lineIds": [
-        "l_63181af5e4d1d223",
-        "l_36999d61e7af0f7b"
+        "l_001",
+        "l_002"
       ],
       "meaning": {
         "parts": [
@@ -15,8 +14,7 @@
             "meaningUnitOccurrenceId": "muo_fixture"
           }
         ]
-      },
-      "startTimeMs": 6000
+      }
     }
   ],
   "extensions": {
@@ -45,20 +43,18 @@
     {
       "fingerprint": "sha256:ae2af1e9e444214ddb87d68d62f68ce298d3d8eb4c6abc655888d741258d18aa",
       "language": "zh",
-      "lineId": "l_63181af5e4d1d223",
+      "lineId": "l_001",
       "role": "text",
       "sourceOrder": 0,
-      "text": "把星光收进",
-      "timeMs": 6000
+      "text": "把星光收进"
     },
     {
       "fingerprint": "sha256:c77c68187513834d2fcc9c111ce2a77570d024a3d7afde1c8ddfa972b74e4914",
       "language": "zh",
-      "lineId": "l_36999d61e7af0f7b",
+      "lineId": "l_002",
       "role": "text",
       "sourceOrder": 1,
-      "text": "未寄出的信",
-      "timeMs": 8000
+      "text": "未寄出的信"
     }
   ],
   "meaningUnits": [
@@ -73,13 +69,13 @@
           "sourceSegments": [
             {
               "end": 5,
-              "lineId": "l_63181af5e4d1d223",
+              "lineId": "l_001",
               "start": 0,
               "text": "把星光收进"
             },
             {
               "end": 5,
-              "lineId": "l_36999d61e7af0f7b",
+              "lineId": "l_002",
               "start": 0,
               "text": "未寄出的信"
             }
@@ -108,13 +104,13 @@
           "sourceSegments": [
             {
               "end": 5,
-              "lineId": "l_63181af5e4d1d223",
+              "lineId": "l_001",
               "start": 0,
               "text": "把星光收进"
             },
             {
               "end": 5,
-              "lineId": "l_36999d61e7af0f7b",
+              "lineId": "l_002",
               "start": 0,
               "text": "未寄出的信"
             }
@@ -129,12 +125,10 @@
   "relations": [],
   "repetitionGroups": [],
   "schema": "sakurauta.lyrics-grammar-analysis",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "source": {
+    "contentHash": "sha256:469e534dc8102118313f1a7923ad1dabc6568866fcbbaf133dbf1f84134b79be",
     "lineCount": 2,
-    "lrcFile": "source.lrc",
-    "lrcProjectionHash": "sha256:92064ce2a38e48905a85467fc30f5d4fd6aabd6b3b7c2a893a1817cd737afa79",
-    "songId": "Fixture - Chinese Night",
     "sourceLanguages": [
       "zh"
     ]

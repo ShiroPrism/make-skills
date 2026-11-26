@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Shared implementation for the lyrics grammar sidecar workflow.
+"""Shared implementation for the Schema v3 timestamp-free lyrics grammar sidecar workflow.
 
-The module intentionally uses only the Python standard library. It owns the
-canonical LRC projection, deterministic identities, translation handoff
-checks, the closed schema-subset validator, and atomic JSON writes. Schema v2
-sidecar semantics are implemented in :mod:`v2lib`.
+The module intentionally uses only the Python standard library. It owns lyric
+header/credit filtering, pure-content identities (contentHash, 1-based lineId,
+text fingerprint), bilingual-lyrics.json extraction/freezing, the closed JSON
+Schema subset validator, and atomic JSON writes.
 """
 
 from __future__ import annotations
@@ -23,20 +23,23 @@ from pathlib import Path
 from typing import Any
 
 SIDECAR_SCHEMA_ID = "sakurauta.lyrics-grammar-analysis"
-PROJECTION_SCHEMA_ID = "sakurauta.lyrics-grammar-source-projection"
+BILINGUAL_SCHEMA_ID = "sakurauta.bilingual-lyrics"
 MANIFEST_SCHEMA_ID = "sakurauta.lyrics-grammar-translation-manifest"
 ISOLATION_SCHEMA_ID = "sakurauta.lyrics-grammar-isolation-proof"
 SEMANTIC_AUDIT_SCHEMA_ID = "sakurauta.lyrics-grammar-semantic-audit"
 REPETITION_CANDIDATE_SCHEMA_ID = "sakurauta.lyrics-grammar-repetition-candidates"
-SCHEMA_VERSION = 2
-PROJECTION_VERSION = "sakurauta-lrc-text-projection-v1"
-LINE_ID_VERSION = "sakurauta-lyric-line-id-v1"
+
+SCHEMA_VERSION = 3
+BILINGUAL_VERSION = 1
+CONTENT_PROJECTION_VERSION = "sakurauta-lrc-content-projection-v3"
+LINE_ID_VERSION = "sakurauta-lyric-line-id-v3"
 FINGERPRINT_VERSION = "sakurauta-lyric-text-fingerprint-v1"
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 AUDIT_VERSION = 1
-REPETITION_CANDIDATE_VERSION = 1
-ISOLATION_VERSION = 2
+REPETITION_CANDIDATE_VERSION = 2
+ISOLATION_VERSION = 3
 MIN_REPETITION_CODE_POINTS = 8
+
 ISOLATION_METHODS = {"native-subagent", "codex-exec", "documented-harness"}
 ISOLATION_CONTEXT = "non-forked-transcript"
 ISOLATION_STAGES = {"grammar-analysis", "semantic-audit"}
@@ -46,7 +49,11 @@ CJK_LEARNER_LANGUAGES = {"zh", "ja", "ko", "yue"}
 HASH_PATTERN = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 ID_PATTERN = re.compile(r"\A[a-z][a-z0-9_-]{2,63}\Z")
 LRC_SUFFIX = ".lrc"
-LRC_LINE_RE = re.compile(r"^\[(\d{2}):([0-5]\d)(?:\.(\d{1,3}))?\]\s*(.*)$")
+LRC_LINE_RE = re.compile(r"^\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$")
+LRC_METADATA_TAG_RE = re.compile(r"^\[(?:ti|ar|al|by|offset|yt|youtube):", re.IGNORECASE)
+TITLE_LINE_MAX_TIME_MS = 2500
+TITLE_LINE_SEPARATOR_RE = re.compile(r"^(.+?)(?:\s+-\s+|\s*[－–—]\s*)(.+)$")
+
 CREDIT_LINE_PATTERNS = (
     re.compile(
         r"^\s*(?:词|詞|作词|作詞|作曲|曲|编曲|編曲|編词|編詞|混音|录音|錄音|"
@@ -62,6 +69,12 @@ CREDIT_LINE_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+
+FILLER_RE = re.compile(
+    r"^(?:[♪♫…\s\.,!~?'\"\(\)（）\-\—\[\]/]+|(?:\b(?:la|na|da|ta|oh|ah|ha|ba|pa|wo|ye|uh|wu|hu|hey|yeah|ooh|wow|scat|du|di|bi|pi|yo)\b[\s♪♫…\.,!~?'\"\(\)（）\-\—]*)+)+$",
+    re.IGNORECASE,
+)
+
 HTML_TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
 HTML_DECL_RE = re.compile(r"<![A-Za-z]|<\?", re.IGNORECASE)
 HTML_COMMENT_RE = re.compile(r"<!--")
@@ -190,28 +203,28 @@ def parse_json_bytes(data: bytes, label: str = "JSON") -> Any:
     except _DuplicateJsonKey as exc:
         raise SidecarError(
             "invalid_json",
-            "$",
             f"Duplicate JSON object key in {label}: {exc.key}",
+            "$",
         ) from exc
     except _NonFiniteJsonNumber as exc:
         raise SidecarError(
             "invalid_json",
-            "$",
             f"Non-finite JSON number in {label}: {exc.value}",
+            "$",
         ) from exc
     except json.JSONDecodeError as exc:
         raise SidecarError(
             "invalid_json",
-            "$",
             f"Invalid JSON in {label}: line {exc.lineno}, column {exc.colno}",
+            "$",
         ) from exc
     except (RecursionError, ValueError) as exc:
-        raise SidecarError("invalid_json", "$", f"Invalid JSON in {label}: {exc}") from exc
+        raise SidecarError("invalid_json", f"Invalid JSON in {label}: {exc}", "$") from exc
 
     issues = json_value_issues(value)
     if issues:
         issue = issues[0]
-        raise SidecarError("invalid_json", issue.path, issue.message)
+        raise SidecarError("invalid_json", issue.message, issue.path)
     return value
 
 
@@ -283,8 +296,8 @@ def assert_distinct_paths(*paths: tuple[str, Path | None]) -> None:
         if key in seen:
             raise SidecarError(
                 "artifact_path_collision",
-                "$",
                 f"{label} must not alias {seen[key]}.",
+                "$",
             )
         seen[key] = label
 
@@ -294,8 +307,8 @@ def ensure_inside_workdir(path: Path, directory: Path, label: str) -> Path:
     if expanded.is_symlink():
         raise SidecarError(
             "artifact_symlink",
-            "$",
             f"{label} must not be a symlink.",
+            "$",
         )
     resolved = expanded.resolve()
     root = directory.expanduser().resolve()
@@ -304,8 +317,8 @@ def ensure_inside_workdir(path: Path, directory: Path, label: str) -> Path:
     except ValueError as exc:
         raise SidecarError(
             "artifact_outside_workdir",
-            "$",
             f"{label} must live inside the grammar work directory.",
+            "$",
         ) from exc
     return resolved
 
@@ -339,67 +352,14 @@ def ensure_local_lrc(path: Path) -> Path:
             "Symlinked LRC inputs are not supported.",
         )
     resolved = expanded.resolve()
-    if resolved.suffix != LRC_SUFFIX:
+    if resolved.suffix.lower() != LRC_SUFFIX:
         raise SidecarError(
             "unsupported_source",
-            "The grammar sidecar generator accepts only a local .lrc file.",
+            "Expected a local .lrc file.",
         )
     if not resolved.is_file():
         raise SidecarError("file_not_found", f"LRC file not found: {resolved}")
     return resolved
-
-
-def lrc_basename_issues(value: Any, path: str) -> list[Issue]:
-    if not isinstance(value, str) or not value:
-        return [
-            Issue(
-                "invalid_lrc_basename",
-                path,
-                "lrcFile must be a non-empty LRC basename.",
-            )
-        ]
-    issues: list[Issue] = []
-    if value in {".", ".."} or value.startswith("."):
-        issues.append(
-            Issue(
-                "invalid_lrc_basename",
-                path,
-                "lrcFile must name a visible sibling LRC file.",
-            )
-        )
-    if value != value.strip():
-        issues.append(
-            Issue(
-                "invalid_lrc_basename",
-                path,
-                "lrcFile must not begin or end with whitespace.",
-            )
-        )
-    if any(ord(char) < 32 or ord(char) == 127 for char in value):
-        issues.append(
-            Issue(
-                "invalid_lrc_basename",
-                path,
-                "lrcFile must not contain control characters.",
-            )
-        )
-    if any(char in '<>:"/\\|?*' for char in value):
-        issues.append(
-            Issue(
-                "invalid_lrc_basename",
-                path,
-                "lrcFile must be one portable Windows filename.",
-            )
-        )
-    if not value.endswith(LRC_SUFFIX):
-        issues.append(
-            Issue(
-                "invalid_lrc_basename",
-                path,
-                "lrcFile must end in .lrc.",
-            )
-        )
-    return issues
 
 
 def _timestamp_ms(minutes: str, seconds: str, fraction: str | None) -> int:
@@ -407,21 +367,63 @@ def _timestamp_ms(minutes: str, seconds: str, fraction: str | None) -> int:
     return (int(minutes) * 60 + int(seconds)) * 1000 + millis
 
 
-def _is_credit_line(text: str) -> bool:
+def is_credit_line(text: str) -> bool:
     trimmed = text.strip()
     return bool(trimmed) and any(
         pattern.search(trimmed) for pattern in CREDIT_LINE_PATTERNS
     )
 
 
-def parse_lrc_rows(path: Path) -> list[LrcRow]:
-    """Return timestamped, non-empty lyric rows in physical file order.
+def _is_vocal_filler(text: str) -> bool:
+    clean = text.strip()
+    if not clean:
+        return True
+    if FILLER_RE.match(clean):
+        return True
+    if re.match(r"^[あアいイうウえエおオラらルるー\s\.,!~?'\"\(\)（）]+$", clean):
+        return True
+    if re.match(r"^[啦啊哦呜耶哈\s\.,!~?'\"\(\)（）]+$", clean):
+        return True
+    return False
 
-    Mirrors the App's grammar projection contract: one leading timestamp per
-    row, optional 1-3 fractional digits, leading whitespace consumed, credit
-    lines excluded, timed title/artist header rows retained, and only
-    whitespace-empty rows discarded.
-    """
+
+def _normalize_title_line_part(value: str) -> str:
+    nfkc = unicodedata.normalize("NFKC", value).lower()
+    return re.sub(r"\s+", " ", nfkc).strip()
+
+
+def _split_title_line(value: str) -> tuple[str, str] | None:
+    match = TITLE_LINE_SEPARATOR_RE.match(value.strip())
+    if not match:
+        return None
+    left = _normalize_title_line_part(match.group(1))
+    right = _normalize_title_line_part(match.group(2))
+    return (left, right) if (left and right) else None
+
+
+def _song_title_line_references(song_id: str) -> list[str]:
+    basename = re.split(r"[\\/]", song_id.strip())[-1] if song_id.strip() else ""
+    if basename.lower().endswith(LRC_SUFFIX):
+        basename = basename[:-4]
+    parts = _split_title_line(basename) or (_normalize_title_line_part(basename), "")
+    return [part for part in parts if len(part) >= 2]
+
+
+def _is_title_artist_header_line(
+    time_ms: int,
+    text: str,
+    references: Sequence[str],
+) -> bool:
+    if time_ms > TITLE_LINE_MAX_TIME_MS or not references:
+        return False
+    parts = _split_title_line(text)
+    if not parts:
+        return False
+    return any(ref in part for ref in references for part in parts)
+
+
+def parse_lrc_rows(path: Path) -> list[LrcRow]:
+    """Return timestamped, non-empty, non-credit LRC rows in physical file order."""
 
     lrc_path = ensure_local_lrc(path)
     try:
@@ -436,13 +438,11 @@ def parse_lrc_rows(path: Path) -> list[LrcRow]:
                 "invalid_lrc",
                 f"NUL character in LRC line {line_number}.",
             )
-
         match = LRC_LINE_RE.match(raw)
         if match is None:
             continue
-
         minutes, seconds, fraction, lyric_text = match.groups()
-        if not lyric_text.strip() or _is_credit_line(lyric_text):
+        if not lyric_text.strip() or is_credit_line(lyric_text):
             continue
         rows.append(
             LrcRow(
@@ -453,6 +453,33 @@ def parse_lrc_rows(path: Path) -> list[LrcRow]:
             )
         )
     return rows
+
+
+def filter_title_artist_rows(
+    rows: Sequence[LrcRow],
+    title_hint: str,
+) -> tuple[list[LrcRow], set[str]]:
+    """Exclude <=2.5s Title - Artist header rows when real lyric rows follow."""
+
+    references = _song_title_line_references(title_hint)
+    candidates = [
+        _is_title_artist_header_line(row.timestamps[0], row.text, references)
+        for row in rows
+    ]
+    can_exclude = any(candidates) and any(
+        not is_title and row.text.strip()
+        for row, is_title in zip(rows, candidates)
+    )
+    if not can_exclude:
+        return list(rows), set()
+    kept: list[LrcRow] = []
+    excluded_texts: set[str] = set()
+    for row, is_title in zip(rows, candidates):
+        if is_title:
+            excluded_texts.add(row.text.strip())
+        else:
+            kept.append(row)
+    return kept, excluded_texts
 
 
 def _nfc(text: str) -> str:
@@ -467,489 +494,360 @@ def grammar_line_fingerprint(text: str) -> str:
     return "sha256:" + _sha256_hex(f"{FINGERPRINT_VERSION}\n{_nfc(text)}")
 
 
-def grammar_line_id(
-    song_id: str,
-    time_ms: int,
-    same_timestamp_ordinal: int,
-    text: str,
-) -> str:
-    payload = "\n".join(
-        [
-            LINE_ID_VERSION,
-            song_id,
-            str(time_ms),
-            str(same_timestamp_ordinal),
-            "text",
-            _nfc(text),
-        ]
-    )
-    return "l_" + _sha256_hex(payload)[:16]
+def grammar_line_id(source_order: int) -> str:
+    if isinstance(source_order, bool) or not isinstance(source_order, int) or source_order < 0:
+        raise SidecarError("invalid_source_order", "sourceOrder must be a non-negative integer.")
+    return f"l_{source_order + 1:03d}"
 
 
-def _projection_hash(song_id: str, lines: Sequence[dict[str, Any]]) -> str:
+def compute_content_hash(texts: Sequence[str]) -> str:
     payload = "\n".join(
         [
-            PROJECTION_VERSION,
-            song_id,
-            str(len(lines)),
-            *[
-                f"{line['timeMs']}\0{line['sameTimestampOrdinal']}\0{_nfc(line['text'])}"
-                for line in lines
-            ],
+            CONTENT_PROJECTION_VERSION,
+            str(len(texts)),
+            *(_nfc(text) for text in texts),
         ]
     )
     return "sha256:" + _sha256_hex(payload)
 
 
-def source_projection_from_lrc(path: Path, song_id: str) -> dict[str, Any]:
-    lrc_path = ensure_local_lrc(path)
-    if not isinstance(song_id, str) or not song_id.strip():
-        raise SidecarError("missing_song_id", "A non-empty songId is required.")
-    rows = parse_lrc_rows(lrc_path)
-    if not rows:
-        raise SidecarError("empty_source", "No timestamped lyric lines were found.")
-
-    projected: list[dict[str, Any]] = []
-    ordinals: dict[int, int] = {}
-    seen_times: set[int] = set()
-    seen_ids: set[str] = set()
-    source_order = 0
-
-    for row in rows:
-        for time_ms in row.timestamps:
-            # The first lexical source row at a timestamp is authoritative.
-            # A translated row inserted below it shares that timestamp and is
-            # therefore ignored by the canonical source projection.
-            if time_ms in seen_times:
-                continue
-            seen_times.add(time_ms)
-            same_timestamp_ordinal = ordinals.get(time_ms, 0)
-            ordinals[time_ms] = same_timestamp_ordinal + 1
-            line_id = grammar_line_id(
-                song_id, time_ms, same_timestamp_ordinal, row.text
-            )
-            fingerprint = grammar_line_fingerprint(row.text)
-            if line_id in seen_ids:
-                raise SidecarError(
-                    "line_id_collision",
-                    f"Generated lineId collision for line {row.line_number}.",
-                )
-            seen_ids.add(line_id)
-            projected.append(
-                {
-                    "lineId": line_id,
-                    "sourceOrder": source_order,
-                    "timeMs": time_ms,
-                    "text": row.text,
-                    "fingerprint": fingerprint,
-                    "role": "text",
-                    "sameTimestampOrdinal": same_timestamp_ordinal,
-                }
-            )
-            source_order += 1
-
-    projection = {
-        "schema": PROJECTION_SCHEMA_ID,
-        "projectionVersion": PROJECTION_VERSION,
-        "lrcFile": lrc_path.name,
-        "songId": song_id,
-        "lineCount": len(projected),
-        "lrcProjectionHash": _projection_hash(song_id, projected),
-        "lines": projected,
+def _build_bilingual_document(
+    pairs: Sequence[tuple[str, str | None]],
+    *,
+    source_languages: Sequence[str] | None = None,
+    learner_language: str | None = None,
+) -> dict[str, Any]:
+    if not pairs:
+        raise SidecarError("empty_source", "No lyric lines remain after metadata and header filtering.")
+    lines: list[dict[str, Any]] = []
+    texts: list[str] = []
+    for source_order, (text, translation) in enumerate(pairs):
+        clean_translation = translation.strip() if isinstance(translation, str) and translation.strip() else None
+        lines.append(
+            {
+                "lineId": grammar_line_id(source_order),
+                "sourceOrder": source_order,
+                "text": text,
+                "fingerprint": grammar_line_fingerprint(text),
+                "translation": clean_translation,
+            }
+        )
+        texts.append(text)
+    doc: dict[str, Any] = {
+        "schema": BILINGUAL_SCHEMA_ID,
+        "schemaVersion": BILINGUAL_VERSION,
+        "lineCount": len(lines),
+        "contentHash": compute_content_hash(texts),
+        "lines": lines,
     }
-    return projection
+    if source_languages:
+        doc["sourceLanguages"] = sorted(set(source_languages))
+    if learner_language:
+        doc["learnerLanguage"] = learner_language
+    return doc
 
 
-def validate_projection(projection: Any) -> list[Issue]:
-    issues: list[Issue] = []
-    if not isinstance(projection, dict):
-        return [Issue("invalid_projection", "$", "Projection must be a JSON object.")]
+def extract_source_index_from_lrc(
+    lrc_path: Path,
+    *,
+    title_hint: str | None = None,
+) -> list[dict[str, Any]]:
+    """Extract canonical filtered lyric lines (l_001..l_NNN) from a source LRC without timestamps."""
+    lrc_resolved = ensure_local_lrc(lrc_path)
+    raw_rows = parse_lrc_rows(lrc_resolved)
+    seen_times: set[int] = set()
+    primary_rows: list[LrcRow] = []
+    for row in raw_rows:
+        t = row.timestamps[0]
+        if t in seen_times:
+            continue
+        seen_times.add(t)
+        primary_rows.append(row)
 
-    required_keys = {"songId", "lineCount", "lrcProjectionHash", "lines"}
-    optional_keys = {"schema", "projectionVersion", "lrcFile"}
-    allowed_keys = required_keys | optional_keys
-    for key in sorted(set(projection) - allowed_keys):
-        issues.append(
-            Issue("invalid_projection", f"$.{key}", f"Unknown projection field: {key}")
-        )
-    for key in sorted(required_keys - set(projection)):
-        issues.append(Issue("invalid_projection", "$", f"Missing projection field: {key}"))
+    source_rows, _ = filter_title_artist_rows(
+        primary_rows,
+        title_hint or lrc_resolved.stem,
+    )
+    if not source_rows:
+        raise SidecarError("empty_source", "No source lyric lines were found in LRC.")
 
-    if "schema" in projection and projection.get("schema") != PROJECTION_SCHEMA_ID:
-        issues.append(Issue("invalid_projection", "$.schema", "Unexpected projection schema."))
-    if (
-        "projectionVersion" in projection
-        and projection.get("projectionVersion") != PROJECTION_VERSION
-    ):
-        issues.append(
-            Issue(
-                "unsupported_projection_version",
-                "$.projectionVersion",
-                f"Expected {PROJECTION_VERSION}.",
+    return [
+        {
+            "lineId": grammar_line_id(order),
+            "sourceOrder": order,
+            "text": row.text,
+        }
+        for order, row in enumerate(source_rows)
+    ]
+
+
+def extract_bilingual_from_lrc_and_tmp(
+    lrc_path: Path,
+    tmp_txt_path: Path,
+    *,
+    title_hint: str | None = None,
+    source_languages: Sequence[str] | None = None,
+    learner_language: str | None = None,
+) -> dict[str, Any]:
+    """Extract timestamp-free bilingual lines from source LRC + translated .tmp.txt.
+
+    Timestamps are used in memory solely for same-timestamp deduplication
+    and <=2.5s title-line exclusion, then discarded completely.
+    """
+
+    lrc_resolved = ensure_local_lrc(lrc_path)
+    tmp_resolved = tmp_txt_path.expanduser()
+    if tmp_resolved.is_symlink():
+        raise SidecarError("unsupported_source", f"Symlinked input is not supported: {tmp_resolved}")
+    tmp_resolved = tmp_resolved.resolve()
+    if not tmp_resolved.is_file():
+        raise SidecarError("file_not_found", f"Translated text file not found: {tmp_resolved}")
+
+    raw_rows = parse_lrc_rows(lrc_resolved)
+    # Deduplicate same-timestamp rows so only the primary source row enters if the LRC was already bilingual.
+    seen_times: set[int] = set()
+    primary_rows: list[LrcRow] = []
+    for row in raw_rows:
+        t = row.timestamps[0]
+        if t in seen_times:
+            continue
+        seen_times.add(t)
+        primary_rows.append(row)
+
+    source_rows, excluded_titles = filter_title_artist_rows(
+        primary_rows,
+        title_hint or lrc_resolved.stem,
+    )
+    if not source_rows:
+        raise SidecarError("empty_source", "No source lyric lines were found in LRC.")
+
+    try:
+        tmp_lines_raw = tmp_resolved.read_text(encoding="utf-8-sig").splitlines()
+    except UnicodeDecodeError as exc:
+        raise SidecarError("invalid_utf8", f"Translated text file is not valid UTF-8: {tmp_resolved}") from exc
+
+    tmp_tokens = [line.strip() for line in tmp_lines_raw if line.strip()]
+    source_texts = [row.text for row in source_rows]
+    source_stripped = [text.strip() for text in source_texts]
+
+    pairs: list[tuple[str, str | None]] = []
+    cursor = 0
+    for index, raw_text in enumerate(source_texts):
+        expected_nfc = _nfc(source_stripped[index])
+        matched_pos: int | None = None
+        for probe in range(cursor, len(tmp_tokens)):
+            if _nfc(tmp_tokens[probe]) == expected_nfc:
+                matched_pos = probe
+                break
+        if matched_pos is None:
+            raise SidecarError(
+                "bilingual_alignment_failed",
+                f"Source line {index + 1} ({raw_text!r}) not found in {tmp_resolved.name}.",
             )
+        cursor = matched_pos + 1
+        next_expected_nfc = (
+            _nfc(source_stripped[index + 1]) if index + 1 < len(source_texts) else None
         )
-    song_id = projection.get("songId")
-    if not isinstance(song_id, str) or not song_id.strip():
-        issues.append(
-            Issue("invalid_projection", "$.songId", "Expected a non-empty songId.")
-        )
-        song_id = ""
 
-    if "lrcFile" in projection:
-        lrc_file = projection.get("lrcFile")
-        issues.extend(lrc_basename_issues(lrc_file, "$.lrcFile"))
+        # Advance cursor past any non-lyric metadata/credit/excluded-title line before reading translation.
+        while cursor < len(tmp_tokens):
+            candidate = tmp_tokens[cursor]
+            if next_expected_nfc is not None and _nfc(candidate) == next_expected_nfc:
+                break
+            if (
+                LRC_METADATA_TAG_RE.match(candidate)
+                or is_credit_line(candidate)
+                or candidate in excluded_titles
+            ):
+                cursor += 1
+                continue
+            break
 
-    lines = projection.get("lines")
-    if not isinstance(lines, list) or not lines:
-        issues.append(Issue("invalid_projection", "$.lines", "Projection lines must be non-empty."))
+        translation: str | None = None
+        if cursor < len(tmp_tokens):
+            candidate = tmp_tokens[cursor]
+            if next_expected_nfc is not None and _nfc(candidate) == next_expected_nfc:
+                translation = None
+            else:
+                translation = candidate
+                cursor += 1
+        pairs.append((raw_text, translation))
+
+    return _build_bilingual_document(
+        pairs,
+        source_languages=source_languages,
+        learner_language=learner_language,
+    )
+
+
+def extract_bilingual_from_bilingual_lrc(
+    bilingual_lrc_path: Path,
+    *,
+    title_hint: str | None = None,
+    source_languages: Sequence[str] | None = None,
+    learner_language: str | None = None,
+) -> dict[str, Any]:
+    """Thin adapter: strip timestamps from an existing bilingual .lrc into bilingual-lyrics.json."""
+
+    lrc_resolved = ensure_local_lrc(bilingual_lrc_path)
+    raw_rows = parse_lrc_rows(lrc_resolved)
+    filtered_rows, _excluded = filter_title_artist_rows(
+        raw_rows,
+        title_hint or lrc_resolved.stem,
+    )
+    if not filtered_rows:
+        raise SidecarError("empty_source", "No lyric lines were found in bilingual LRC.")
+
+    pairs: list[tuple[str, str | None]] = []
+    index_by_time: dict[int, int] = {}
+    for row in filtered_rows:
+        t = row.timestamps[0]
+        if t not in index_by_time:
+            index_by_time[t] = len(pairs)
+            pairs.append((row.text, None))
+        else:
+            target_idx = index_by_time[t]
+            existing_text, existing_trans = pairs[target_idx]
+            if existing_trans is None:
+                pairs[target_idx] = (existing_text, row.text)
+            else:
+                raise SidecarError(
+                    "duplicate_translation_row",
+                    f"Multiple translation rows found at timestamp line {row.line_number}.",
+                )
+
+    return _build_bilingual_document(
+        pairs,
+        source_languages=source_languages,
+        learner_language=learner_language,
+    )
+
+
+def _schema_path(name: str) -> Path:
+    return Path(__file__).resolve().parents[1] / "schema" / "v3" / name
+
+
+def validate_bilingual_lyrics(document: Any) -> list[Issue]:
+    if not isinstance(document, dict):
+        return [Issue("invalid_bilingual_lyrics", "$", "Bilingual lyrics document must be a JSON object.")]
+    schema = read_json(_schema_path("bilingual-lyrics.schema.json"))
+    issues = validate_schema_instance(document, schema)
+    if issues:
         return issues
 
-    if projection.get("lineCount") != len(lines):
+    lines = document.get("lines", [])
+    if document.get("lineCount") != len(lines):
         issues.append(
-            Issue("invalid_projection", "$.lineCount", "lineCount does not match lines.")
+            Issue(
+                "line_count_mismatch",
+                "$.lineCount",
+                "lineCount must equal len(lines).",
+            )
         )
+        return issues
 
-    ordinals: dict[int, int] = {}
-    seen_ids: set[str] = set()
-    seen_times: set[int] = set()
-    normalized_lines: list[dict[str, Any]] = []
+    texts: list[str] = []
     for index, line in enumerate(lines):
         path = f"$.lines[{index}]"
-        if not isinstance(line, dict):
-            issues.append(Issue("invalid_projection", path, "Line must be an object."))
-            continue
-        required = {
-            "lineId",
-            "sourceOrder",
-            "timeMs",
-            "text",
-            "fingerprint",
-            "role",
-            "sameTimestampOrdinal",
-        }
-        if set(line) != required:
+        if line.get("sourceOrder") != index:
             issues.append(
-                Issue("invalid_projection", path, "Line fields do not match projection v1.")
+                Issue("non_canonical_line_order", path + ".sourceOrder", "sourceOrder must equal array index.")
             )
-            continue
-        line_id = line.get("lineId")
-        time_ms = line.get("timeMs")
-        text = line.get("text")
-        source_order = line.get("sourceOrder")
-        same_timestamp_ordinal = line.get("sameTimestampOrdinal")
-        if (
-            not isinstance(line_id, str)
-            or not isinstance(time_ms, int)
-            or isinstance(time_ms, bool)
-            or time_ms < 0
-            or not isinstance(text, str)
-            or not text
-            or not isinstance(source_order, int)
-            or isinstance(source_order, bool)
-            or source_order != index
-            or line.get("role") != "text"
-            or not isinstance(same_timestamp_ordinal, int)
-            or isinstance(same_timestamp_ordinal, bool)
-            or same_timestamp_ordinal < 0
-        ):
-            issues.append(Issue("invalid_projection", path, "Invalid projected line values."))
-            continue
-        if ID_PATTERN.fullmatch(line_id) is None:
-            issues.append(Issue("invalid_projection", path + ".lineId", "Invalid lineId form."))
-        if time_ms in seen_times:
+        if line.get("lineId") != grammar_line_id(index):
             issues.append(
-                Issue(
-                    "duplicate_timestamp",
-                    path + ".timeMs",
-                    "Projection may contain only the first source line at a timestamp.",
-                )
+                Issue("invalid_line_id", path + ".lineId", f"Expected {grammar_line_id(index)}.")
             )
-        seen_times.add(time_ms)
-        expected_ordinal = ordinals.get(time_ms, 0)
-        ordinals[time_ms] = expected_ordinal + 1
-        if same_timestamp_ordinal != expected_ordinal:
+        text = line.get("text", "")
+        if line.get("fingerprint") != grammar_line_fingerprint(text):
             issues.append(
-                Issue(
-                    "invalid_projection",
-                    path + ".sameTimestampOrdinal",
-                    "sameTimestampOrdinal is not canonical.",
-                )
+                Issue("invalid_line_fingerprint", path + ".fingerprint", "Line fingerprint is not canonical.")
             )
-        expected_id = grammar_line_id(
-            song_id, time_ms, same_timestamp_ordinal, text
-        )
-        expected_fingerprint = grammar_line_fingerprint(text)
-        if line_id != expected_id:
-            issues.append(Issue("invalid_projection", path + ".lineId", "lineId is not canonical."))
-        if line.get("fingerprint") != expected_fingerprint:
+        translation = line.get("translation")
+        if isinstance(translation, str) and not translation.strip():
             issues.append(
-                Issue("invalid_projection", path + ".fingerprint", "Fingerprint is not canonical.")
+                Issue("blank_translation", path + ".translation", "Translation must be null or non-blank.")
             )
-        if line_id in seen_ids:
-            issues.append(Issue("duplicate_id", path + ".lineId", "Duplicate lineId."))
-        seen_ids.add(line_id)
-        normalized_lines.append(line)
+        texts.append(text)
 
-    if len(normalized_lines) == len(lines):
-        expected_hash = _projection_hash(song_id, normalized_lines)
-        if projection.get("lrcProjectionHash") != expected_hash:
-            issues.append(
-                Issue(
-                    "invalid_projection",
-                    "$.lrcProjectionHash",
-                    "Projection hash does not match canonical line data.",
-                )
+    if not issues and document.get("contentHash") != compute_content_hash(texts):
+        issues.append(
+            Issue(
+                "invalid_content_hash",
+                "$.contentHash",
+                "contentHash does not match canonical NFC line texts.",
             )
+        )
     return issues
 
 
-def load_projection(path: Path) -> dict[str, Any]:
-    projection = read_json(path)
-    issues = validate_projection(projection)
+def load_bilingual_lyrics(path: Path) -> dict[str, Any]:
+    doc = read_json(path)
+    issues = validate_bilingual_lyrics(doc)
     if issues:
         raise SidecarError(issues[0].code, issues[0].message, issues[0].path)
-    return projection
+    return doc
 
 
-def verify_source_matches_projection(
-    projection: dict[str, Any], source_lrc: Path
-) -> tuple[dict[str, Any], list[Issue]]:
-    lrc_path = ensure_local_lrc(source_lrc)
-    issues: list[Issue] = []
-    if projection.get("lrcFile") is not None and lrc_path.name != projection.get("lrcFile"):
-        issues.append(
-            Issue(
-                "lrc_file_mismatch",
-                "$.source.lrcFile",
-                "Projection belongs to a different LRC basename.",
-            )
+def _has_acceptable_translations(
+    bilingual: dict[str, Any],
+    *,
+    allow_untranslated: bool = False,
+) -> list[Issue]:
+    if allow_untranslated:
+        return []
+    lines = bilingual.get("lines", [])
+    translated_count = sum(1 for line in lines if isinstance(line.get("translation"), str) and line["translation"].strip())
+    if translated_count > 0:
+        return []
+    non_filler = [line["text"] for line in lines if not _is_vocal_filler(line["text"])]
+    if not non_filler:
+        return []
+    return [
+        Issue(
+            "missing_translation",
+            "$.lines",
+            "Bilingual lyrics contain no translated lines (pass --allow-untranslated if intentionally untranslated).",
         )
-
-    current = source_projection_from_lrc(lrc_path, projection["songId"])
-    if current["lrcProjectionHash"] != projection["lrcProjectionHash"]:
-        issues.append(
-            Issue(
-                "stale_source_projection",
-                "$.source.lrcProjectionHash",
-                "The source LRC text or timeline changed after the projection was created.",
-            )
-        )
-    report = {
-        "ok": not issues,
-        "projectionHash": projection["lrcProjectionHash"],
-        "currentProjectionHash": current["lrcProjectionHash"],
-        "lineCount": current["lineCount"],
-    }
-    return report, issues
+    ]
 
 
-def verify_translation_handoff(
-    projection: dict[str, Any], translated_lrc: Path
-) -> tuple[dict[str, Any], list[Issue]]:
-    """Verify that inserted rows did not alter the canonical source projection.
-
-    For every rounded-millisecond timestamp, only the first lexical row is
-    canonical source input. This matches SakuraUta's duplicate-timestamp rule
-    and permits a bilingual LRC while translation text stays outside it.
-    """
-
-    issues: list[Issue] = []
-    try:
-        rows = parse_lrc_rows(translated_lrc)
-    except SidecarError as exc:
-        return (
-            {
-                "ok": False,
-                "sourceProjectionHash": projection.get("lrcProjectionHash"),
-                "sourceLinesMatched": 0,
-                "translationLines": 0,
-            },
-            [Issue(exc.code, exc.path, exc.message)],
-        )
-
-    expected_lines = projection["lines"]
-    expected_times = {line["timeMs"] for line in expected_lines}
-    canonical_entries: list[tuple[int, str, int, tuple[int, ...]]] = []
-    seen_times: set[int] = set()
-    extra_rows: list[LrcRow] = []
-    for row in rows:
-        primary_times: list[int] = []
-        for time_ms in row.timestamps:
-            if time_ms not in seen_times:
-                primary_times.append(time_ms)
-                seen_times.add(time_ms)
-        if not primary_times:
-            extra_rows.append(row)
-            continue
-        if len(primary_times) != len(row.timestamps):
-            issues.append(
-                Issue(
-                    "unsupported_source_shape",
-                    f"$lrc.line[{row.line_number}]",
-                    "Multi-timestamp rows cannot be represented as a bilingual "
-                    "source/translation pair in the canonical handoff.",
-                )
-            )
-            break
-        canonical_entries.append(
-            (primary_times[0], row.text, row.line_number, row.timestamps)
-        )
-
-    source_lines_matched = 0
-    for index, expected in enumerate(expected_lines):
-        if index >= len(canonical_entries):
-            break
-        first_time, text, line_number, all_times = canonical_entries[index]
-        # Multi-timestamp rows project once but must not fabricate timestamps
-        # outside the frozen projection.
-        if (
-            first_time != expected["timeMs"]
-            or text != expected["text"]
-            or any(item not in expected_times for item in all_times)
-        ):
-            issues.append(
-                Issue(
-                    "stale_source_projection",
-                    f"$lrc.line[{line_number}]",
-                    "Canonical source text or timeline does not match the frozen projection.",
-                )
-            )
-            break
-        source_lines_matched += 1
-
-    if len(canonical_entries) != len(expected_lines):
-        issues.append(
-            Issue(
-                "stale_source_projection",
-                "$lrc",
-                f"Expected {len(expected_lines)} canonical source rows, "
-                f"found {len(canonical_entries)}.",
-            )
-        )
-    canonical_line_numbers = {entry[2] for entry in canonical_entries}
-    previous_row: LrcRow | None = None
-    for row in rows:
-        if row.line_number in canonical_line_numbers:
-            previous_row = row
-            continue
-        if (
-            previous_row is None
-            or previous_row.line_number not in canonical_line_numbers
-            or previous_row.timestamps != row.timestamps
-        ):
-            issues.append(
-                Issue(
-                    "stale_source_projection",
-                    f"$lrc.line[{row.line_number}]",
-                    "Each translation row must immediately follow its same-timestamp "
-                    "canonical source row.",
-                )
-            )
-            break
-        previous_row = row
-    extra_counts: dict[int, int] = {}
-    for row in extra_rows:
-        if not row.timestamps:
-            issues.append(
-                Issue(
-                    "stale_source_projection",
-                    f"$lrc.line[{row.line_number}]",
-                    "A translation row must retain at least one source timestamp.",
-                )
-            )
-            break
-        if any(time_ms not in expected_times for time_ms in row.timestamps):
-            issues.append(
-                Issue(
-                    "stale_source_projection",
-                    f"$lrc.line[{row.line_number}]",
-                    "Inserted row contains a timestamp absent from the source projection.",
-                )
-            )
-            break
-        for time_ms in row.timestamps:
-            extra_counts[time_ms] = extra_counts.get(time_ms, 0) + 1
-        if any(extra_counts[time_ms] > 1 for time_ms in row.timestamps):
-            issues.append(
-                Issue(
-                    "stale_source_projection",
-                    f"$lrc.line[{row.line_number}]",
-                    "More than one translation row was inserted for a source timestamp.",
-                )
-            )
-            break
-
-    translation_lines = len(extra_rows)
-    if not issues and not translation_lines:
-        issues.append(
-            Issue(
-                "missing_translation",
-                "$lrc",
-                "The bilingual LRC contains no inserted translation rows.",
-            )
-        )
-
-    report = {
-        "ok": not issues,
-        "sourceProjectionHash": projection["lrcProjectionHash"],
-        "sourceLinesMatched": source_lines_matched,
-        "translationLines": translation_lines,
-    }
-    return report, issues
-
-
-def build_translation_manifest(
-    projection: dict[str, Any], translated_lrc: Path
-) -> tuple[dict[str, Any], list[Issue]]:
-    lrc_path = ensure_local_lrc(translated_lrc)
-    handoff, issues = verify_translation_handoff(projection, lrc_path)
-    if issues:
-        return handoff, issues
-    manifest = {
-        "schema": MANIFEST_SCHEMA_ID,
-        "manifestVersion": MANIFEST_VERSION,
-        "lrcFile": projection.get("lrcFile", lrc_path.name),
-        "lineCount": projection["lineCount"],
-        "lrcProjectionHash": projection["lrcProjectionHash"],
-        "translatedLrcSha256": sha256_file(lrc_path),
-    }
-    return manifest, []
-
-
-def write_accepted_translation(
-    projection: dict[str, Any],
-    accepted_lrc: Path,
+def write_accepted_bilingual(
+    bilingual_path: Path,
     workdir: Path,
+    *,
+    allow_untranslated: bool = False,
+    replace: bool = False,
 ) -> tuple[Path, dict[str, Any], list[Issue]]:
-    """Freeze an already-translated bilingual LRC into the work directory."""
+    """Freeze a validated bilingual-lyrics.json into bilingual-lyrics.frozen.json + manifest."""
 
     workdir = workdir.expanduser().resolve()
     if not workdir.is_dir():
         raise SidecarError("invalid_workdir", f"Work directory not found: {workdir}")
-    accepted_lrc = ensure_local_lrc(accepted_lrc)
-    translated_lrc = workdir / "translated.lrc"
-    manifest_path = workdir / "translation-manifest.json"
-    if translated_lrc.exists() or manifest_path.exists():
+
+    bilingual = load_bilingual_lyrics(bilingual_path)
+    issues = _has_acceptable_translations(bilingual, allow_untranslated=allow_untranslated)
+    frozen_path = ensure_inside_workdir(workdir / "bilingual-lyrics.frozen.json", workdir, "frozen bilingual lyrics")
+    manifest_path = ensure_inside_workdir(workdir / "translation-manifest.json", workdir, "translation manifest")
+    if issues:
+        return frozen_path, {"ok": False, "contentHash": bilingual["contentHash"]}, issues
+
+    if (frozen_path.exists() or manifest_path.exists()) and not replace:
         raise SidecarError(
             "translation_already_frozen",
-            "The work directory already contains a frozen translation.",
+            "Refusing to replace an existing frozen translation; use --replace or a fresh workdir.",
         )
-    data = accepted_lrc.read_bytes()
-    manifest, issues = build_translation_manifest(projection, accepted_lrc)
-    if issues:
-        return translated_lrc, manifest, issues
-    _write_bytes_atomic(translated_lrc, data)
-    if sha256_file(translated_lrc) != manifest["translatedLrcSha256"]:
-        translated_lrc.unlink(missing_ok=True)
-        return translated_lrc, manifest, [
-            Issue(
-                "translation_changed_after_freeze",
-                "$.translatedLrcSha256",
-                "The accepted translation changed while it was being frozen.",
-            )
-        ]
-    write_json_atomic(manifest_path, manifest, replace=False)
-    return translated_lrc, manifest, []
+
+    write_json_atomic(frozen_path, bilingual, replace=replace)
+    bilingual_sha = sha256_file(frozen_path)
+    manifest = {
+        "schema": MANIFEST_SCHEMA_ID,
+        "manifestVersion": MANIFEST_VERSION,
+        "lineCount": bilingual["lineCount"],
+        "contentHash": bilingual["contentHash"],
+        "bilingualSha256": bilingual_sha,
+    }
+    write_json_atomic(manifest_path, manifest, replace=replace)
+    return frozen_path, manifest, []
 
 
 def validate_manifest(manifest: Any) -> list[Issue]:
@@ -958,10 +856,9 @@ def validate_manifest(manifest: Any) -> list[Issue]:
     required = {
         "schema",
         "manifestVersion",
-        "lrcFile",
         "lineCount",
-        "lrcProjectionHash",
-        "translatedLrcSha256",
+        "contentHash",
+        "bilingualSha256",
     }
     issues: list[Issue] = []
     if set(manifest) != required:
@@ -969,90 +866,97 @@ def validate_manifest(manifest: Any) -> list[Issue]:
             Issue(
                 "invalid_manifest",
                 "$",
-                "Manifest fields do not match translation manifest v1.",
+                "Manifest fields do not match translation manifest v2.",
             )
         )
     if manifest.get("schema") != MANIFEST_SCHEMA_ID:
         issues.append(Issue("invalid_manifest", "$.schema", "Unexpected manifest schema."))
     if manifest.get("manifestVersion") != MANIFEST_VERSION:
         issues.append(
-            Issue("unsupported_manifest_version", "$.manifestVersion", "Expected version 1.")
+            Issue("unsupported_manifest_version", "$.manifestVersion", "Expected manifestVersion 2.")
         )
-    if not isinstance(manifest.get("lrcFile"), str) or not manifest["lrcFile"].lower().endswith(
-        LRC_SUFFIX
-    ):
-        issues.append(Issue("invalid_manifest", "$.lrcFile", "Expected an LRC basename."))
     line_count = manifest.get("lineCount")
-    if (
-        not isinstance(line_count, int)
-        or isinstance(line_count, bool)
-        or line_count < 1
-    ):
+    if not isinstance(line_count, int) or isinstance(line_count, bool) or line_count < 1:
         issues.append(Issue("invalid_manifest", "$.lineCount", "Expected a positive integer."))
-    hash_value = manifest.get("translatedLrcSha256")
-    if not isinstance(hash_value, str) or HASH_PATTERN.fullmatch(hash_value) is None:
-        issues.append(
-            Issue("invalid_manifest", "$.translatedLrcSha256", "Invalid translated LRC hash.")
-        )
-    projection_hash = manifest.get("lrcProjectionHash")
-    if not isinstance(projection_hash, str) or HASH_PATTERN.fullmatch(projection_hash) is None:
-        issues.append(
-            Issue("invalid_manifest", "$.lrcProjectionHash", "Invalid projection hash.")
-        )
+    for key in ("contentHash", "bilingualSha256"):
+        val = manifest.get(key)
+        if not isinstance(val, str) or HASH_PATTERN.fullmatch(val) is None:
+            issues.append(Issue("invalid_manifest", f"$.{key}", f"Invalid {key}."))
     return issues
 
 
-def verify_frozen_translation(
-    projection: dict[str, Any],
-    translated_lrc: Path,
+def verify_frozen_bilingual(
+    frozen_path: Path,
     manifest: dict[str, Any],
-) -> tuple[dict[str, Any], list[Issue]]:
+) -> tuple[dict[str, Any], dict[str, Any] | None, list[Issue]]:
     issues = validate_manifest(manifest)
     if issues:
         return (
             {
                 "ok": False,
-                "sourceProjectionHash": projection.get("lrcProjectionHash"),
-                "sourceLinesMatched": 0,
-                "translationLines": 0,
+                "contentHash": manifest.get("contentHash") if isinstance(manifest, dict) else None,
+                "lineCount": 0,
+                "translatedLines": 0,
             },
+            None,
             issues,
         )
-    handoff, handoff_issues = verify_translation_handoff(projection, translated_lrc)
-    issues.extend(handoff_issues)
+    if not frozen_path.is_file():
+        return (
+            {"ok": False, "contentHash": manifest["contentHash"], "lineCount": 0, "translatedLines": 0},
+            None,
+            [Issue("file_not_found", "$", f"Frozen bilingual file not found: {frozen_path}")],
+        )
 
-    if manifest.get("lrcProjectionHash") != projection.get("lrcProjectionHash"):
+    actual_sha = sha256_file(frozen_path)
+    if manifest.get("bilingualSha256") != actual_sha:
+        return (
+            {"ok": False, "contentHash": manifest["contentHash"], "lineCount": 0, "translatedLines": 0},
+            None,
+            [
+                Issue(
+                    "translation_changed_after_freeze",
+                    "$.bilingualSha256",
+                    "The frozen bilingual lyrics changed after the accepted translation was frozen.",
+                )
+            ],
+        )
+
+    bilingual = read_json(frozen_path)
+    bilingual_issues = validate_bilingual_lyrics(bilingual)
+    if bilingual_issues:
+        return (
+            {"ok": False, "contentHash": manifest["contentHash"], "lineCount": 0, "translatedLines": 0},
+            None,
+            bilingual_issues,
+        )
+    if bilingual["contentHash"] != manifest["contentHash"]:
         issues.append(
             Issue(
-                "stale_projection_hash",
-                "$.lrcProjectionHash",
-                "Translation manifest belongs to a different source projection.",
+                "stale_content_hash",
+                "$.contentHash",
+                "Manifest contentHash does not match frozen bilingual lyrics.",
             )
         )
-    if manifest.get("lineCount") != projection.get("lineCount"):
-        issues.append(
-            Issue("invalid_manifest", "$.lineCount", "Manifest lineCount does not match.")
-        )
-    expected_lrc_file = projection.get("lrcFile", translated_lrc.name)
-    if manifest.get("lrcFile") != expected_lrc_file:
-        issues.append(
-            Issue("invalid_manifest", "$.lrcFile", "Manifest lrcFile does not match.")
-        )
-
-    actual_hash = sha256_file(translated_lrc)
-    if manifest.get("translatedLrcSha256") != actual_hash:
+    if bilingual["lineCount"] != manifest["lineCount"]:
         issues.append(
             Issue(
-                "translation_changed_after_freeze",
-                "$.translatedLrcSha256",
-                "The translated LRC changed after the accepted translation was frozen.",
+                "line_count_mismatch",
+                "$.lineCount",
+                "Manifest lineCount does not match frozen bilingual lyrics.",
             )
         )
-
-    report = dict(handoff)
-    report["ok"] = not issues
-    report["translatedLrcSha256"] = actual_hash
-    return report, issues
+    translated_lines = sum(
+        1 for line in bilingual["lines"] if isinstance(line.get("translation"), str) and line["translation"].strip()
+    )
+    report = {
+        "ok": not issues,
+        "contentHash": bilingual["contentHash"],
+        "lineCount": bilingual["lineCount"],
+        "translatedLines": translated_lines,
+        "bilingualSha256": actual_sha,
+    }
+    return report, bilingual, issues
 
 
 SUPPORTED_SCHEMA_KEYWORDS = {
@@ -1185,7 +1089,7 @@ def validate_schema_instance(
     root_schema: dict[str, Any] | None = None,
     path: str = "$",
 ) -> list[Issue]:
-    """Validate the deliberately small, closed schema subset used by v2."""
+    """Validate the deliberately small, closed schema subset used by v3."""
 
     if root_schema is None:
         value_issues = json_value_issues(instance, path=path)
@@ -1321,8 +1225,8 @@ def _write_bytes_atomic(path: Path, data: bytes) -> None:
     if path.is_symlink():
         raise SidecarError(
             "artifact_symlink",
-            "$",
             f"Refusing to write through a symlink: {path}",
+            "$",
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temp_name = tempfile.mkstemp(
@@ -1346,8 +1250,8 @@ def write_json_atomic(path: Path, value: Any, replace: bool = False) -> bool:
     if path.is_symlink():
         raise SidecarError(
             "artifact_symlink",
-            "$",
             f"Refusing to write through a symlink: {path}",
+            "$",
         )
     data = pretty_json(value).encode("utf-8")
     if path.exists():

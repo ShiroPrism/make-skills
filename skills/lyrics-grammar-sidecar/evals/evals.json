@@ -1,0 +1,26 @@
+{
+  "skill_name": "lyrics-grammar-sidecar",
+  "evals": [
+    {
+      "id": 1,
+      "name": "workflow-handoff-pure-content",
+      "prompt": "刚刚跑完了 sakurauta-lyrics-workflow 的翻译与导出阶段，已经生成了 data/song.grammar-work/bilingual-lyrics.json 和使用 l_001 行号编写的 blocks-plan.json，请按规范生成并验证 Schema v3 的段落语法解析文件。",
+      "expected_output": "Orchestrator skips extract_bilingual.py, runs verify_translation.py directly on the workdir, dispatches isolated Grammar Child (scaffold_draft -> enrichment.json -> resolve_spans -> discover_repetitions) and separate Audit Child (audit_summary --emit-template [pending] -> populate reviewed IDs & status -> Stage A validate_audit --check-format), records audit isolation, runs Stage B validate_audit with --bilingual and --isolation, finalizes song.json without timeMs/lrcFile/songId, and runs validate_all.py --cleanup-workdir.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "external-bilingual-lrc-adapter",
+      "prompt": "我有一首已经手工合并好双语歌词的外部 LRC 文件 songs/song.lrc，没有 blocks-plan.json，请帮我直接生成对应的语法解析 sidecar JSON。",
+      "expected_output": "Runs extract_bilingual.py songs/song.lrc --from-bilingual-lrc to produce pure-content bilingual-lyrics.json, freezes with verify_translation.py, has Grammar Child generate blocks-plan.json using l_001..l_NNN IDs before scaffold_draft.py (without b_meta metadata blocks), and produces a validated timestamp-free Schema v3 song.json.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "blocks-enrichment-and-spurious-repetition-pruning",
+      "prompt": "在生成语法解析草稿时，副歌某一段需要拆成多段 meaningUnits 并在 enrichment.json 中覆盖 blocks[].meaning.parts，同时 discover_repetitions 抓到了一个跨词边界的伪重复候选，请在不手改 semantic-draft.json 的情况下完成构建、显式排除并走完审计定稿。",
+      "expected_output": "Grammar Child supplies meaningUnits, blocks patches, and excludedRepetitions in enrichment.json (or --exclude on discover_repetitions.py), merges cleanly via resolve_spans.py --merge-enrichment, passes prepare.py, has Audit Child independently review the block meaning and exclusion reason from a pending template, and passes Stage B validate_audit.py, finalize.py, and validate_all.py.",
+      "files": []
+    }
+  ]
+}

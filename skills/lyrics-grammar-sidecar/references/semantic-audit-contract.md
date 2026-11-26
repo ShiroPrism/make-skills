@@ -1,101 +1,55 @@
-# Independent Semantic Audit Contract v1
+# Schema v3 Semantic Audit & Isolation Contract
 
-The semantic-audit child is a fresh non-forked transcript. It must differ from both the parent and the grammar-analysis child. Its only authored artifact is `<workdir>/semantic-audit.json`.
+Audit Child must run as an independent fresh subagent with a `childTranscriptId` distinct from Grammar Child. Pass only `bilingual-lyrics.frozen.json`, `analysis-candidate.json`, `analysis-candidate.sha256`, and this contract — never pass Grammar Child's authoring transcript.
 
-## Inputs
+## 1. Generate Audit Summary & Pending Template
 
-The auditor reads:
+Run `audit_summary.py` to print every block, frozen line translation, `meaningUnit`, phrase, grammar note, any `excludedRepetitions`, and pre-audit diagnostics, while emitting a **`status: "pending"`** template to `<workdir>/semantic-audit.json`:
 
-- the original local `.lrc`;
-- the frozen `<workdir>/translated.lrc`;
-- `<workdir>/analysis-candidate.json`;
-- `<workdir>/analysis-candidate.sha256`;
-- `<workdir>/semantic-draft.json` as read-only supporting context;
-- [draft-contract.md](draft-contract.md) for field semantics.
+```powershell
+python -X utf8 "<grammar-skill>/scripts/audit_summary.py" "<workdir>" --emit-template "<workdir>/semantic-audit.json" --replace
+```
 
-The candidate is the canonical reviewed artifact. The draft is supporting context only and must not be used to override changed candidate content. The candidate must remain the exact canonical UTF-8 JSON bytes emitted by `prepare.py`; duplicate keys, non-finite numbers, and unpaired surrogates are invalid.
+- When `--replace` overwrites an earlier completed report (`pass` or `fail`), `audit_summary.py` automatically archives the previous report into `<workdir>/audit-history/semantic-audit-rNN-<hash8>.json` so audit history is never lost.
+- The emitted template intentionally starts with `"status": "pending"`, `"reviewedBlockIds": []`, and `"reviewedMeaningUnitIds": []` so an unedited template cannot pass validation.
 
-The auditor must not edit the draft, candidate, hash, translation, projection, or final sibling JSON.
+## 2. Independent Semantic Checks
 
-## What to Audit
+Compare every block and entity in `analysis-candidate.json` against `bilingual-lyrics.frozen.json`:
 
-For every candidate block and meaning unit:
+- **Meaning fidelity & completeness (`unsupported-addition` / `translation-mismatch` / `coverage-gap`)**: Verify every `meaningUnit.text`, assembled `block.meaning.parts`, and `grammarNote` covers **every single line** in the block (paying special attention to opening/closing lines and any `[WARN] Possible omitted line` diagnostic) without hallucinated imagery, dropped clauses, tense reversals, ungrounded pronoun shifts (such as injecting plural `"我们"` for Japanese volitional `〜おう/〜よう` when the lyric persona is singular `"我"`), or duplicate boundary punctuation.
+- **Repetition consistency & exclusions (`shared-drift`)**: Verify shared `meaningUnits` and `phrases` across `repetitionGroups` preserve consistent meaning or justify nuance shifts with a truthful `semanticOverride.reason`. If `extensions.excludedRepetitions` is non-empty, verify each excluded candidate is genuinely a spurious fragment rather than a real repeated lyric hook.
+- **Grounding & clean prose (`missing-source-evidence`)**: Confirm every phrase, relation, and `grammarNote` matches actual `sourceSegments`, uses `learnerLanguage`, and contains zero HTML/XML tags, file paths, or timeline/file metadata leakage.
 
-1. Check that effective block meaning is a faithful synthesis of the frozen translation for the block's source spans.
-2. Reject unsupported additions, including new motives, causes, scenes, relationships, intensity words, editorial commentary, or meta-narrative.
-3. Check changed and newly analyzed tails. A tail not covered by either a meaning part or required phrase/note relation is a coverage gap.
-4. Check that canonical shared fields are not semantically drifted between occurrences. Canonical data must be reused unless an occurrence has an explicit, reasoned override.
-5. Check that every note, relation, uncertainty, and override has source evidence in the original LRC and accepted translation.
-6. Check that learner-facing prose uses the requested language.
+## 3. Fill `semantic-audit.json` & Run Stage A Self-Check
 
-Warnings may be recorded without failing. Any error finding makes the audit fail and blocks finalization.
-
-## Report
+Update `<workdir>/semantic-audit.json` (`schema: "sakurauta.lyrics-grammar-semantic-audit"`, `auditVersion: 1`) with every reviewed `blockId` and `meaningUnitId`, any `findings`, and `status: "pass"` (only if zero `error` findings) or `"fail"` (at least one `error` finding):
 
 ```json
 {
   "schema": "sakurauta.lyrics-grammar-semantic-audit",
   "auditVersion": 1,
-  "candidateSha256": "sha256:...",
+  "candidateSha256": "<exact hash from analysis-candidate.sha256>",
   "learnerLanguage": "zh-CN",
   "status": "pass",
-  "reviewedBlockIds": ["b_chorus1", "b_chorus2", "b_chorus3"],
-  "reviewedMeaningUnitIds": ["mu_chorus_shared", "mu_tail_extra"],
+  "reviewedBlockIds": ["b_01", "b_02"],
+  "reviewedMeaningUnitIds": ["mu_b_01", "mu_b_02"],
   "findings": []
 }
 ```
 
-`reviewedBlockIds` and `reviewedMeaningUnitIds` must exactly match the IDs in the candidate, without omissions or duplicates.
+Valid finding `code` values: `unsupported-addition`, `translation-mismatch`, `shared-drift`, `coverage-gap`, `missing-source-evidence`, `other`, with `severity: "error" | "warning"`.
 
-To avoid manual ID extraction, JSON parsing, or temporary Python scripts, the auditor should use the deterministic `scripts\audit_summary.py` tool:
+### Two-Stage `validate_audit.py` Contract
 
-```powershell
-python scripts\audit_summary.py "<workdir>" `
-  --emit-template "<workdir>\semantic-audit.json" `
-  --learner-language "<target>" `
-  --replace
-```
+1. **Stage A — Audit Child self-check (BEFORE `record_isolation.py`)**: Run `validate_audit.py` **without** `--bilingual` and **without** `--isolation`, passing `--check-format` so both valid `"pass"` and valid `"fail"` reports (with error findings) confirm schema, candidate hash, and 100% block/MU coverage while rejecting `"pending"`:
 
-This prints a concise 1-page alignment table of candidate blocks, source lines, frozen translations, phrases, grammar notes, and synthesized meanings, while automatically pre-populating `semantic-audit.json` with 100% complete `reviewedBlockIds` and `reviewedMeaningUnitIds`.
+   ```powershell
+   python -X utf8 "<grammar-skill>/scripts/validate_audit.py" "<workdir>/analysis-candidate.json" --candidate-hash "<workdir>/analysis-candidate.sha256" "<workdir>/semantic-audit.json" --learner-language "<target>" --check-format
+   ```
 
-Auditors must not dump multi-megabyte candidate JSON files into context or inspect internal Python scripts (`v2lib.py`, `sidecarlib.py`, etc.). Because `audit_summary.py` prints meaning units, phrases, and grammar notes together, you normally do not need to read `analysis-candidate.json` or `semantic-draft.json` unless verifying a specific JSON path for a finding.
+2. **Stage B — Orchestrator full gate (AFTER `record_isolation.py --stage semantic-audit`)**: The orchestrator records `isolation-semantic-audit.json` (which binds `contentHash`, `artifactSha256`, and distinct `childTranscriptId`) and then runs `validate_audit.py` **with both `--bilingual` and `--isolation`** and **without `--check-format`** (requiring `status: "pass"` before `finalize.py`). Passing only one of `--bilingual` or `--isolation` fails with `incomplete_audit_inputs`.
 
-Finding shape:
+## 4. Revision Loop Cap
 
-```json
-{
-  "code": "unsupported-addition",
-  "severity": "error",
-  "path": "$.meaningUnits[3].text",
-  "message": "候选新增了冻结译文没有表达的“完全释放”。"
-}
-```
-
-Stable codes:
-
-- `unsupported-addition`
-- `translation-mismatch`
-- `shared-drift`
-- `coverage-gap`
-- `missing-source-evidence`
-- `other`
-
-`status: "fail"` requires at least one `error` finding. `status: "pass"` requires no `error` findings.
-
-## Validation and Identity
-
-The audit report schema is located at `schema/v2/semantic-audit.schema.json`. Auditors should run `validate_audit.py` directly without importing internal Python modules or inspecting implementation details.
-
-Before returning, the audit child should self-verify the report:
-
-```powershell
-python -X utf8 scripts\validate_audit.py `
-  "<workdir>\analysis-candidate.json" `
-  --candidate-hash "<workdir>\analysis-candidate.sha256" `
-  --learner-language "<learner language>" `
-  "<workdir>\semantic-audit.json"
-```
-
-On Windows, always invoke Python with `-X utf8` to avoid OEM code page corruption with Japanese and Chinese text.
-
-Do not write isolation proofs or invent transcript IDs inside the audit child. After the audit child returns, the parent coordinator records `isolation-semantic-audit.json` using the audit child's actual transcript ID. The grammar proof and audit proof must contain different `childTranscriptId` values, and each proof binds the actual artifact SHA-256. A same-child audit, v1 proof, stale projection hash, changed report, or failed audit must prevent finalization.
+If Stage A finishes with `status: "fail"`, return all findings together so Grammar Child fixes every finding in a single batched revision pass before re-running `prepare.py` and a second Audit Child pass. Do not run more than 2 audit rounds without escalating to the user.

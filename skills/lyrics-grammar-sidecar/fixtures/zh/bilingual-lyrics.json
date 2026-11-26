@@ -1,0 +1,26 @@
+{
+  "contentHash": "sha256:469e534dc8102118313f1a7923ad1dabc6568866fcbbaf133dbf1f84134b79be",
+  "learnerLanguage": "zh-CN",
+  "lineCount": 2,
+  "lines": [
+    {
+      "fingerprint": "sha256:ae2af1e9e444214ddb87d68d62f68ce298d3d8eb4c6abc655888d741258d18aa",
+      "lineId": "l_001",
+      "sourceOrder": 0,
+      "text": "把星光收进",
+      "translation": "Tuck the starlight into"
+    },
+    {
+      "fingerprint": "sha256:c77c68187513834d2fcc9c111ce2a77570d024a3d7afde1c8ddfa972b74e4914",
+      "lineId": "l_002",
+      "sourceOrder": 1,
+      "text": "未寄出的信",
+      "translation": "the letter never sent"
+    }
+  ],
+  "schema": "sakurauta.bilingual-lyrics",
+  "schemaVersion": 1,
+  "sourceLanguages": [
+    "zh"
+  ]
+}

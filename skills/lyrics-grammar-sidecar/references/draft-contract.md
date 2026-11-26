@@ -1,375 +1,162 @@
-# Semantic Draft Contract v2
+# Schema v3 Draft & Enrichment Contract
 
-`semantic-draft.json` is the grammar-analysis child's only authored artifact. It is not a production sidecar. Use `../schema/v2/lyrics-grammar-analysis.schema.json`; v1 is unsupported.
+Grammar Child receives only `<workdir>/bilingual-lyrics.frozen.json`, optional `<workdir>/blocks-plan.json`, and this contract, then authors `<workdir>/semantic-draft.json` conforming to Schema v3 (`schema: "sakurauta.lyrics-grammar-analysis"`, `schemaVersion: 3`).
 
-The draft must be based on the original LRC and the accepted, frozen `translated.lrc`. The deterministic pipeline normalizes projected source fields, discovers exact repetition candidates, creates `analysis-candidate.json`, and later requires an independent semantic audit.
+## 1. Input Artifact: `bilingual-lyrics.frozen.json`
 
-The grammar projection keeps timed title/artist header rows and excludes credit rows, empty rows, and non-timed tags. Title rows are metadata blocks, not scrollable lyric lines. The production JSON is self-contained: recipients need only a sibling LRC with the same NFC source text order; timestamps may differ and the App re-anchors by text. `translation-manifest.json` and `.grammar-work` are audit inputs, not distribution requirements.
+Timestamps, untimed metadata tags (`[ti:]`, `[ar:]`, etc.), credit lines (`词：`, `曲：`, `Lyrics:`, etc.), blank lines, and `<= 2.5s` `Title - Artist` header lines are already removed before entering this stage. Every row in `lines` is a real lyric line:
 
-## Pipeline Boundary
+```json
+{
+  "schema": "sakurauta.bilingual-lyrics",
+  "schemaVersion": 1,
+  "lineCount": 4,
+  "contentHash": "sha256:...",
+  "sourceLanguages": ["ja"],
+  "learnerLanguage": "zh-CN",
+  "lines": [
+    {
+      "lineId": "l_001",
+      "sourceOrder": 0,
+      "text": "君がくれた",
+      "fingerprint": "sha256:...",
+      "translation": "你给我的"
+    },
+    {
+      "lineId": "l_002",
+      "sourceOrder": 1,
+      "text": "Ah〜",
+      "fingerprint": "sha256:...",
+      "translation": null
+    }
+  ]
+}
+```
+
+- `lineId`: 1-based zero-padded sequential ID (`l_001`, `l_002`, ...; 4+ digits for >999 lines).
+- `sourceOrder`: 0-based canonical order (`0 .. lineCount - 1`).
+- `translation`: finalized line translation (preserving context-sensitive translations across repeated lines), or `null` for vocal fillers / untranslated lines.
+
+## 2. `blocks-plan.json` Contract
+
+`blocks-plan.json` defines stanza blocks using canonical `l_001`..`l_NNN` line IDs (individual IDs or `"l_001-l_003"` ranges; legacy 1-based integers are also parsed by `scaffold_draft.py` for compatibility):
+
+```json
+{
+  "blocks": [
+    { "lines": ["l_001", "l_002", "l_003"], "meaning": "你给我的那个小小约定，直到如今我都还清楚记得。" },
+    { "lines": ["l_004"], "meaning": "那是你曾经交给我的约定。" }
+  ]
+}
+```
+
+- Under `sakurauta-lyrics-workflow`, Stage 3 Arbiter is the sole author of `blocks-plan.json`.
+- When running directly on an external bilingual `.lrc` (Path B) without `blocks-plan.json`, Grammar Child creates `<workdir>/blocks-plan.json` from `bilingual-lyrics.frozen.json` before scaffolding.
+- Every line `l_001`..`l_NNN` must appear monotonically with zero gaps or duplicates, and every block `meaning` must cover all lines in that block. Never create a `b_meta` block.
+
+## 3. Scaffold -> Enrich -> Resolve -> Repetition Flow
+
+### Step 1: Scaffold & Inspect `DRAFT INDEX`
+
+```powershell
+python -X utf8 "<grammar-skill>/scripts/scaffold_draft.py" "<workdir>" --learner-language "<target>"
+```
+
+`scaffold_draft.py` writes `<workdir>/semantic-draft.json` and prints the `DRAFT INDEX` in this exact format (block ID + lineId range + per-line Unicode code-point counts):
 
 ```text
-semantic-draft.json (scaffold_draft.py -> enrichment.json -> resolve_spans.py --merge-enrichment)
-  -> prepare.py
-  -> analysis-candidate.json + analysis-candidate.sha256
-  -> independent semantic-audit child (audit_summary.py)
-  -> semantic-audit.json
-  -> grammar/audit isolation proofs
-  -> finalize.py
-  -> sibling <song>.json
+--- DRAFT INDEX (for enrichment.json) ---
+[b_01] l_001..l_003 (3 lines)
+  1 | l_001 (5 cp) | 君がくれた
+  2 | l_002 (6 cp) | 小さな約束を
+  3 | l_003 (8 cp) | 今も覚えている
 ```
 
-The grammar child must follow the 3-step single-pass authoring workflow:
+### Step 2: Author Compact `<workdir>/enrichment.json`
 
-1. **Scaffold**: Run `python -X utf8 scripts\scaffold_draft.py "<workdir>" --learner-language "<target>" --auto-repetitions` to generate a 100% Schema v2 compliant initial draft with lines, blocks, agent-authored stanza meanings, and repetition groups pre-filled. `scaffold_draft.py` strictly requires `<workdir>\blocks-plan.json` (produced by `lyrics-translator` in Dual-Track Mode) and prints a compact **DRAFT INDEX** (`[blockId] lineNo | lineId | text`) plus any **REPETITION GROUPS** directly to stdout so you do **not** need to read the 1,000+ line `semantic-draft.json`.
-2. **Author Compact Enrichment**: Write `<workdir>\enrichment.json` containing only `phrases`, `grammarNotes` (and optional `relations` / `uncertainties`), using the `blockId` and `lineId` values from the printed DRAFT INDEX. Avoid reading `semantic-draft.json` or `lyrics-grammar-analysis.schema.json`, and never use 20+ sequential `edit_file` calls on `semantic-draft.json`.
-3. **Merge, Resolve Spans & Validate**: Run both commands in one shell call:
-   `python -X utf8 scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --merge-enrichment "<workdir>\enrichment.json" --in-place && python -X utf8 scripts\validate.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --learner-language "<target>"`
+Write `<workdir>/enrichment.json` instead of hand-editing offsets in `semantic-draft.json`. Specify `sourceSegments` with `lineId` + exact `text` substring (`start`/`end` are resolved in Unicode code points by `resolve_spans.py`).
 
-### Quick Field Checklist (`enrichment.json`)
+**Allowed top-level keys in `enrichment.json`** (any other key raises `invalid_enrichment`):
 
-- **`phrases[]` required keys**: `phraseId`, `kind` (`"word" | "phrase" | "clause" | "idiom" | "expression" | "token" | "other"`), `surface` (auto-derived from first occurrence `sourceSegments` if omitted), `role`, `labels` (`[{"namespace": "...", "key": "..."}]`), `explanation` (in `learnerLanguage`), `gloss` (in `learnerLanguage`), `confidence` (`0..1`), `occurrences` (`[{"occurrenceId": "...", "blockId": "...", "sourceSegments": [{"lineId": "...", "text": "..."}]}]`; `start`/`end` are auto-computed by `resolve_spans.py`).
-- **`grammarNotes[]` required keys**: `noteId`, `scope` (`{"blockIds": ["b_01"], "phraseId": "...", "occurrenceIds": ["..."]}` — omit `phraseId`/`occurrenceIds` for block-only notes; never pass `occurrenceIds` without `phraseId`), `explanation` (in `learnerLanguage`), `labels`, `confidence`.
-- **Shared repetitions**: If a phrase lies inside a `REPETITION GROUPS` span, include one occurrence per block in that repetition group at identical canonical offsets.
+| Key | Type | Merge Behavior |
+| :-- | :-- | :-- |
+| `phrases` | `array` | Replaces `draft.phrases`; spans auto-resolved |
+| `grammarNotes` | `array` | Replaces `draft.grammarNotes` |
+| `relations` | `array` | Replaces `draft.relations` |
+| `uncertainties` | `array` | Replaces `draft.uncertainties` |
+| `meaningUnits` | `array` (optional) | Replaces `draft.meaningUnits` when splitting a block into multiple parts or adding `semanticOverride`; spans auto-resolved |
+| `blocks` | `array` (optional) | Patches matching scaffolded blocks by `blockId`; allowed patch keys are `blockId`, `meaning`, `labels`, `register`, `notes`, `confidence` (`lineIds` are preserved) |
+| `excludedRepetitions` | `array` (optional) | Writes `[{"repetitionId": "rep_...", "reason": "..."}]` into `draft.extensions.excludedRepetitions` to exclude spurious substring candidates |
 
-Agents must not inspect or read internal library scripts (`v2lib.py`, `sidecarlib.py`, etc.), dump full files into context, or author structural lines/blocks manually.
-
-The grammar child may not invent, merge, shorten, lengthen, or omit a repetition candidate. If the draft fails preparation, revise the semantic draft in a fresh grammar child; do not edit the frozen translation.
-
-During authoring, the grammar child can run `scripts\validate.py` at any time to verify Schema v2 conformance, block line coverage, code-point spans, and shared occurrences before final preparation:
-
-```powershell
-python -X utf8 scripts\validate.py `
-  "<workdir>\semantic-draft.json" `
-  --projection "<workdir>\source-projection.json" `
-  --learner-language "<target>"
-```
-
-On Windows, always invoke Python with `-X utf8` so Japanese and Chinese characters in logs and error reports render cleanly without OEM code page corruption.
-
-## Top Level
+Example `enrichment.json`:
 
 ```json
 {
-  "schema": "sakurauta.lyrics-grammar-analysis",
-  "schemaVersion": 2,
-  "source": {
-    "lrcFile": "Song.lrc",
-    "songId": "Artist - Song",
-    "sourceLanguages": ["ja"],
-    "lineCount": 12,
-    "lrcProjectionHash": "sha256:..."
-  },
-  "lines": [],
-  "repetitionGroups": [],
-  "meaningUnits": [],
-  "blocks": [],
-  "phrases": [],
-  "relations": [],
-  "grammarNotes": [],
-  "uncertainties": [],
-  "extensions": {
-    "learnerLanguage": "zh-CN"
-  }
-}
-```
-
-All listed fields are required. `extensions.learnerLanguage` is required and must use the workflow target language.
-
-Do not add a `meaning.text`, per-line translation field, v1 compatibility field, or any second snapshot of canonical text.
-
-## Source Lines
-
-Copy every line from `source-projection.json`, add `language`, and optionally add `endTimeMs` / `languageSpans`:
-
-```json
-{
-  "lineId": "l_...",
-  "sourceOrder": 0,
-  "timeMs": 1000,
-  "text": "夜明けの歌を君と歌う",
-  "fingerprint": "sha256:...",
-  "role": "text",
-  "language": "ja",
-  "languageSpans": [
-    {"start": 0, "end": 10, "language": "ja"}
-  ]
-}
-```
-
-`start` and `end` are Unicode code-point indexes, not UTF-16 units or byte offsets. In Python 3, `len(str)` and string slicing `str[start:end]` operate natively on Unicode code points. Calculate spans programmatically using `start = line_text.index(sub_text)` and `end = start + len(sub_text)` to avoid off-by-one errors from manual character counting. Alternatively, run `python scripts\resolve_spans.py "<workdir>\semantic-draft.json" --projection "<workdir>\source-projection.json" --in-place` to automatically calculate and populate code-point spans. The preparer rebuilds every projected source field from the frozen projection; a model-side edit fails with `stale_source_projection`.
-
-Block `lineIds` must follow `sourceOrder`. Member `timeMs` values may be non-monotonic after user timeline calibration; block `startTimeMs` / `endTimeMs` are the member minimum / maximum.
-
-## Repetition Discovery
-
-Repetition discovery is deterministic and owned by this Skill. After the draft's lines and blocks are complete, run:
-
-```powershell
-python scripts\discover_repetitions.py `
-  "<workdir>\semantic-draft.json" `
-  --projection "<workdir>\source-projection.json" `
-  --workdir "<workdir>" `
-  --learner-language "<learner language>" `
-  --replace --in-place
-```
-
-Pass `--in-place` to automatically update `repetitionGroups` in the draft, or copy each candidate's `repetitionId` and `occurrences` array verbatim into the draft:
-
-```json
-{
-  "repetitionId": "rep_...",
-  "occurrences": [
+  "phrases": [
     {
-      "occurrenceId": "repo_...",
-      "blockId": "b_chorus1",
-      "sourceSegments": [
+      "phraseId": "p_promise",
+      "kind": "phrase",
+      "role": "theme",
+      "labels": [{ "namespace": "syntax", "key": "relative_clause" }],
+      "explanation": "动词过去式连体修饰名词“約束”。",
+      "gloss": "你给我的小小约定",
+      "confidence": 0.92,
+      "occurrences": [
         {
-          "lineId": "l_line1",
-          "start": 0,
-          "end": 10,
-          "text": "夜明けの歌を君と歌う"
+          "occurrenceId": "po_promise_1",
+          "blockId": "b_01",
+          "sourceSegments": [
+            { "lineId": "l_001", "text": "君がくれた" },
+            { "lineId": "l_002", "text": "小さな約束を" }
+          ]
         }
       ]
     }
-  ]
+  ],
+  "relations": [],
+  "grammarNotes": [
+    {
+      "noteId": "gn_promise_rel",
+      "scope": { "blockIds": ["b_01"], "phraseId": "p_promise", "occurrenceIds": ["po_promise_1"] },
+      "explanation": "「くれた」表示对方为自己做出的动作并延续到后续记忆。",
+      "labels": [{ "namespace": "syntax", "key": "modifier" }],
+      "confidence": 0.9
+    }
+  ],
+  "uncertainties": []
 }
 ```
 
-Do not copy the candidate tool's auxiliary `normalizedText` field into the draft.
+### Step 3: Merge Spans & Discover Repetitions
 
-Discovery rules:
+```powershell
+python -X utf8 "<grammar-skill>/scripts/resolve_spans.py" "<workdir>/semantic-draft.json" --merge-enrichment "<workdir>/enrichment.json" --in-place
+python -X utf8 "<grammar-skill>/scripts/discover_repetitions.py" "<workdir>/semantic-draft.json" --workdir "<workdir>" --learner-language "<target>" --in-place --replace --check-draft
+```
 
-- source line boundaries are removed before comparison;
-- the concatenated source span is NFC-normalized as one string; do not normalize each line independently;
-- matching is exact and maximal, never fuzzy;
-- internal whitespace remains significant;
-- only spans of at least 8 Unicode code points are emitted;
-- metadata blocks (`discourse:metadata`) are excluded;
-- overlapping groups are allowed;
-- one group has at most one occurrence per block.
-
-Every candidate must remain present after any later draft edit. If blocks or lines change, rerun discovery and replace the draft's candidate list exactly.
-
-## Blocks and Composed Meaning
-
-Blocks are learning units. Their `meaning` contains ordered references to meaning-unit occurrences, not copied text:
-
-```json
-{
-  "blockId": "b_chorus3",
-  "lineIds": ["l_line20", "l_line21"],
-  "startTimeMs": 20000,
-  "endTimeMs": 21000,
-  "meaning": {
-    "parts": [
+- **Learner language consistency**: Pass the exact same `<target>` tag (e.g., `zh-CN` or `zh`) to `scaffold_draft.py`, `discover_repetitions.py`, and all downstream orchestrator scripts.
+- **Repetition discovery & pruning**: `discover_repetitions.py` finds maximal exact NFC repetitions (`>= 8` Unicode code points) across learning blocks, automatically trims mid-ASCII-word cuts and 1-character stray cross-line bleeds, populates `repetitionGroups`, and (with `--check-draft`) runs full Schema v3 draft validation immediately so issues are caught before leaving Grammar Child. If an accidental cross-word substring candidate still appears in `repetition-candidates.json` (for example a coincidence across unrelated words rather than a real repeated lyric hook), exclude it explicitly with a clear reason in `--learner-language`:
+  - Either pass `--exclude "<repetitionId>=<reason>"` to `discover_repetitions.py`, or include `"excludedRepetitions": [{"repetitionId": "...", "reason": "..."}]` in `enrichment.json` and re-run `resolve_spans.py` + `discover_repetitions.py`.
+  - `prepare.py` verifies `repetitionGroups` equals the discovered candidates minus validated `extensions.excludedRepetitions`.
+- **Shared occurrences, partial-overlap blocks & overrides**: For every kept `repetitionGroup`, any `phrase` or `meaningUnit` inside one occurrence must map to the corresponding span in every other block of that group (sharing the canonical meaning/gloss, or attaching a `semanticOverride` with a non-empty `reason`).
+  - **Partial-overlap blocks** (e.g., Chorus 1 has an extra leading/trailing line `このまま` that Final Chorus lacks): Because `scaffold_draft.py` initially creates 1:1 `meaningUnits` per block, `discover_repetitions.py --check-draft` (and `prepare.py`) will flag `shared-occurrence-incomplete` unless you split the longer block in `enrichment.json` using `blocks` (`meaning.parts`) and `meaningUnits` — one occurrence covering the exact `repetitionGroup` span across both blocks, and a separate `meaningUnit` covering the non-overlapping remainder:
+    ```json
+    "blocks": [
       {
-        "meaningUnitOccurrenceId": "muo_chorus3_shared"
-      },
-      {
-        "meaningUnitOccurrenceId": "muo_chorus3_tail",
-        "textBefore": "，"
+        "blockId": "b_04",
+        "meaning": {
+          "parts": [
+            { "meaningUnitOccurrenceId": "muo_b_04_rep" },
+            { "meaningUnitOccurrenceId": "muo_b_04_tail" }
+          ]
+        }
       }
     ]
-  },
-  "labels": [],
-  "confidence": 0.92
-}
-```
+    ```
+  - Multi-part `blocks[].meaning.parts` must cover every line in `block.lineIds` without duplicate boundary punctuation.
 
-Effective text is the concatenation of `textBefore + effectiveMeaningText` for each part. Parts must be:
+## 4. Forbidden Schema v3 Fields & Content Guards
 
-- source ordered;
-- non-overlapping;
-- within the block;
-- sufficient to cover every `lineId` in the block at least once.
-
-`textBefore` is learner-facing connective text, limited to 120 characters. Every changed tail or otherwise uncovered line requires its own meaning-unit occurrence.
-
-Punctuation belongs to exactly one side of a part boundary. If the preceding effective text already ends with a sentence or clause mark, do not start `textBefore` with another punctuation mark. Omit `textBefore` when the previous part already ends with `。` / `？` / `！` / `，` / `；` / `、`; use punctuation-bearing `textBefore` only when the previous part ends without punctuation. Invalid boundaries include `。，`, `。；`, `？，`, `。。`, and `，，`.
-
-## Meaning Units
-
-A meaning unit owns the canonical learner-facing synthesis shared by all of its occurrences:
-
-```json
-{
-  "meaningUnitId": "mu_chorus_shared",
-  "text": "在黎明的歌声中，两人守着同一个约定。",
-  "labels": [],
-  "confidence": 0.94,
-  "occurrences": [
-    {
-      "occurrenceId": "muo_chorus1_shared",
-      "blockId": "b_chorus1",
-      "sourceSegments": [
-        {
-          "lineId": "l_chorus1_line1",
-          "start": 0,
-          "end": 10,
-          "text": "夜明けの歌を君と歌う"
-        }
-      ]
-    },
-    {
-      "occurrenceId": "muo_chorus3_shared",
-      "blockId": "b_chorus3",
-      "sourceSegments": [
-        {
-          "lineId": "l_chorus3_line1",
-          "start": 0,
-          "end": 10,
-          "text": "夜明けの歌を君と歌う"
-        }
-      ]
-    }
-  ]
-}
-```
-
-Each occurrence has one contiguous source span. Cross-line segments must use immediately adjacent source lines; the previous segment ends at its line's end, and the next starts at code point zero.
-
-Canonical `text` must be a faithful synthesis of the frozen translation. Do not invent motives, causes, setting, intensity, editorial judgements, or meta-narrative absent from the accepted translation.
-
-Only an explicit occurrence override may change the effective text:
-
-```json
-{
-  "occurrenceId": "muo_chorus3_tail",
-  "blockId": "b_chorus3",
-  "sourceSegments": [
-    {
-      "lineId": "l_chorus3_tail",
-      "start": 0,
-      "end": 8,
-      "text": "あの日あの場所で"
-    }
-  ],
-  "semanticOverride": {
-    "reason": "该处重复后语气转为再次确认。",
-    "text": "再次唱响时强调重新出发的决心。"
-  }
-}
-```
-
-The reason is required and is reviewed by the semantic auditor.
-
-## Phrases and Occurrences
-
-A phrase owns canonical surface and grammar semantics. Each occurrence owns one block and one contiguous source span:
-
-```json
-{
-  "phraseId": "p_dawn_song",
-  "kind": "phrase",
-  "surface": "夜明けの歌を君と歌う",
-  "role": "shared_theme",
-  "labels": [
-    {"namespace": "lang:ja", "key": "noun_phrase"}
-  ],
-  "explanation": "把黎明、歌声与同行者连成一个完整画面。",
-  "gloss": "与你同唱黎明之歌",
-  "confidence": 0.94,
-  "occurrences": [
-    {
-      "occurrenceId": "po_dawn_song_1",
-      "blockId": "b_chorus1",
-      "sourceSegments": [
-        {
-          "lineId": "l_chorus1_line1",
-          "start": 0,
-          "end": 10,
-          "text": "夜明けの歌を君と歌う"
-        }
-      ]
-    },
-    {
-      "occurrenceId": "po_dawn_song_3",
-      "blockId": "b_chorus3",
-      "sourceSegments": [
-        {
-          "lineId": "l_chorus3_line1",
-          "start": 0,
-          "end": 10,
-          "text": "夜明けの歌を君と歌う"
-        }
-      ]
-    }
-  ]
-}
-```
-
-- `surface` must be NFC-equal to every occurrence's exact source span.
-- A phrase may occur multiple times in one block.
-- Canonical prose is shared automatically; never copy it per occurrence.
-- A relation points to the canonical `phraseId` and therefore applies to every occurrence.
-- An occurrence override may replace `role`, `labels`, `explanation`, `gloss`, `notes`, or `alternatives`, but must include `reason`.
-
-If a phrase occurrence is wholly inside a repetition occurrence, every block in that repetition group must contain a corresponding phrase occurrence at the same canonical offset. Missing mappings fail with `shared-occurrence-incomplete`; wrong mappings fail with `shared-occurrence-mismatch`.
-
-The same shared-occurrence rule applies to meaning-unit occurrences.
-
-## Notes, Relations, and Multi-Block Scope
-
-Relations connect canonical phrases:
-
-```json
-{
-  "relationId": "r_theme_follow",
-  "fromPhraseId": "p_dawn_song",
-  "toPhraseId": "p_same_promise",
-  "type": "develops_theme",
-  "labels": [{"namespace": "syntax", "key": "theme_development"}],
-  "explanation": "歌唱的画面落到共同守护的约定上。",
-  "confidence": 0.86
-}
-```
-
-Grammar notes and uncertainties use block arrays:
-
-```json
-{
-  "scope": {
-    "blockIds": ["b_chorus1", "b_chorus3"],
-    "phraseId": "p_dawn_song",
-    "occurrenceIds": ["po_dawn_song_1", "po_dawn_song_3"]
-  }
-}
-```
-
-- `blockIds` is required, non-empty, and unique.
-- Without `phraseId`, the scope is block-only and `occurrenceIds` is forbidden.
-- With `phraseId`, every listed block must contain that phrase.
-- `occurrenceIds`, when present, narrows the scope to explicit phrase occurrences and all must belong to the listed blocks.
-
-Use one canonical note or relation rather than duplicating it per repeated block.
-
-## Learner Language
-
-All learner-facing prose must use `extensions.learnerLanguage`:
-
-- meaning-unit `text` and override `text`;
-- block meaning `textBefore`;
-- phrase `gloss`, `explanation`, `notes`, alternatives, and overrides;
-- relation/note explanations;
-- uncertainty messages and alternatives;
-- override reasons.
-
-Stable identifiers such as `role`, `register`, `relation.type`, and label namespace/key may remain English. A gloss is learner-facing prose, not a machine identifier.
-
-No present learner-facing field may be blank or whitespace-only. Omit an optional field instead of emitting an empty string.
-
-## Content Guardrails
-
-- No inline HTML, entities, CDATA, declarations, or processing instructions.
-- Reject duplicate JSON keys, non-finite numbers, unpaired UTF-16 surrogates, and invalid UTF-8 before validation.
-- No absolute filesystem paths.
-- `source.lrcFile` is a visible sibling basename only.
-- No per-line translation fields.
-- IDs are globally unique.
-- Every numeric span refers to source Unicode code points.
-- Unknown fields fail closed through the v2 schema.
-
-## Semantic Audit Handoff
-
-After `prepare.py` succeeds, the parent records the grammar child proof and dispatches a different fresh child using [semantic-audit-contract.md](semantic-audit-contract.md). The auditor reviews `analysis-candidate.json` as the canonical artifact, may read this draft as supporting context, and writes only `semantic-audit.json`.
+- **Forbidden metadata/timeline fields**: `lrcFile`, `songId`, `lrcProjectionHash`, `timeMs`, `startTimeMs`, `endTimeMs`, `sameTimestampOrdinal`, or `b_meta` blocks fail Schema v3 validation (`additionalProperties: false`).
+- **No per-line translation keys**: Keys containing `translat` inside `lines` or `blocks` are rejected in the output sidecar. Compose holistic block meanings through `meaningUnits` + `blocks[].meaning.parts`.
+- **No HTML/XML, absolute paths, or wrong learner language**: All prose fields (including `excludedRepetitions[].reason`) must be plain text in `extensions.learnerLanguage`.

@@ -3,11 +3,10 @@
     {
       "blockId": "b_fixture",
       "confidence": 0.92,
-      "endTimeMs": 4000,
       "labels": [],
       "lineIds": [
-        "l_339b430c43f26ea9",
-        "l_0b56b8a7c57ca70e"
+        "l_001",
+        "l_002"
       ],
       "meaning": {
         "parts": [
@@ -15,8 +14,7 @@
             "meaningUnitOccurrenceId": "muo_fixture"
           }
         ]
-      },
-      "startTimeMs": 2000
+      }
     }
   ],
   "extensions": {
@@ -45,20 +43,18 @@
     {
       "fingerprint": "sha256:0aea28dc71b116623d642947e6c797ae931d818a9a17927b8fdc954b809366fa",
       "language": "ko",
-      "lineId": "l_339b430c43f26ea9",
+      "lineId": "l_001",
       "role": "text",
       "sourceOrder": 0,
-      "text": "너에게 보내는",
-      "timeMs": 2000
+      "text": "너에게 보내는"
     },
     {
       "fingerprint": "sha256:8d829c6689f31042360ce1b63ff77a490ba4bff2fa227d6f6a7053a463287736",
       "language": "ko",
-      "lineId": "l_0b56b8a7c57ca70e",
+      "lineId": "l_002",
       "role": "text",
       "sourceOrder": 1,
-      "text": "짧은 편지야",
-      "timeMs": 4000
+      "text": "짧은 편지야"
     }
   ],
   "meaningUnits": [
@@ -73,13 +69,13 @@
           "sourceSegments": [
             {
               "end": 7,
-              "lineId": "l_339b430c43f26ea9",
+              "lineId": "l_001",
               "start": 0,
               "text": "너에게 보내는"
             },
             {
               "end": 6,
-              "lineId": "l_0b56b8a7c57ca70e",
+              "lineId": "l_002",
               "start": 0,
               "text": "짧은 편지야"
             }
@@ -108,13 +104,13 @@
           "sourceSegments": [
             {
               "end": 7,
-              "lineId": "l_339b430c43f26ea9",
+              "lineId": "l_001",
               "start": 0,
               "text": "너에게 보내는"
             },
             {
               "end": 6,
-              "lineId": "l_0b56b8a7c57ca70e",
+              "lineId": "l_002",
               "start": 0,
               "text": "짧은 편지야"
             }
@@ -129,12 +125,10 @@
   "relations": [],
   "repetitionGroups": [],
   "schema": "sakurauta.lyrics-grammar-analysis",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "source": {
+    "contentHash": "sha256:11120b654275793a2acc505c16509865570b433c9c82967b8bdb2c62e07c185a",
     "lineCount": 2,
-    "lrcFile": "source.lrc",
-    "lrcProjectionHash": "sha256:50b198bde8af13e1fe6388a481e73bde4b36e029ba133c8d0d2b90fc5ceec033",
-    "songId": "Fixture - Korean Letter",
     "sourceLanguages": [
       "ko"
     ]

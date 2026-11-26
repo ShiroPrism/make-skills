@@ -1,0 +1,34 @@
+{
+  "contentHash": "sha256:4265c5e1010f1875c286bca4fd9e6a6343c97d1872bb3ee14a24e0b7690089d6",
+  "learnerLanguage": "zh-CN",
+  "lineCount": 3,
+  "lines": [
+    {
+      "fingerprint": "sha256:886873aaf86f0c7d12993b8bf57a6facb1b185cc765e7ce37e652c189d00b101",
+      "lineId": "l_001",
+      "sourceOrder": 0,
+      "text": "😀é",
+      "translation": "笑脸 é"
+    },
+    {
+      "fingerprint": "sha256:4e42d0b0d8be98b0964228d1da4fce746e2e4b948cb9268ed6788f57ff52faaf",
+      "lineId": "l_002",
+      "sourceOrder": 1,
+      "text": "same",
+      "translation": "相同"
+    },
+    {
+      "fingerprint": "sha256:4e42d0b0d8be98b0964228d1da4fce746e2e4b948cb9268ed6788f57ff52faaf",
+      "lineId": "l_003",
+      "sourceOrder": 2,
+      "text": "same",
+      "translation": "仍相同"
+    }
+  ],
+  "schema": "sakurauta.bilingual-lyrics",
+  "schemaVersion": 1,
+  "sourceLanguages": [
+    "en",
+    "ja"
+  ]
+}

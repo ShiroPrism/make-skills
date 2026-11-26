@@ -1,238 +1,51 @@
 # make-skills
 
-Reusable, user-invoked Skills maintained outside the SakuraUta application.
+Reusable, user-invoked skills for bilingual lyric translation and timestamp-free Schema v3 lyrics grammar sidecar generation.
 
-## SakuraUta Lyrics Workflow v2
+## Skills Overview
 
-Entry point: `skills/sakurauta-lyrics-workflow/SKILL.md`.
+- **`skills/sakurauta-lyrics-workflow/SKILL.md`**: End-to-end orchestrator connecting `lyrics-translator` (Single-Draft 3-Stage Translation) -> pure-content bilingual handoff & occurrence-ordered `.lrc` merge -> `lyrics-grammar-sidecar` (isolated grammar authoring, independent semantic audit, atomic finalization).
+- **`skills/lyrics-translator/SKILL.md`**: Standalone high-fidelity lyric translator across global languages using a Single-Draft Adversarial 3-Stage Pipeline (`roles/translator.md` -> isolated `roles/reviewer.md` -> `roles/arbiter.md`) and deterministic `.lrc` strip/merge scripts.
+- **`skills/lyrics-grammar-sidecar/SKILL.md`**: Produces validated, timestamp-free Schema v3 grammar analysis sidecar JSON files (`<song>.json`) from `<workdir>/bilingual-lyrics.json` + `<workdir>/blocks-plan.json` or external bilingual `.lrc` files.
 
-The parent coordinates three fresh child roles:
+## Pipeline Architecture
 
-1. **Translation child** reads the unchanged `skills/lyrics-translator/SKILL.md` directly and produces an accepted bilingual LRC. There is no translation wrapper Skill. If the LRC is already an accepted bilingual file, skip this child and enter grammar-only mode.
-2. **Grammar child** reads `skills/lyrics-grammar-sidecar/SKILL.md` and its v2 draft contract. It authors only `semantic-draft.json`; deterministic tools write the repetition-candidate list and freeze the analysis candidate.
-3. **Semantic-audit child** is a different fresh transcript. It reviews `analysis-candidate.json` against the original LRC and frozen translation, then writes only `semantic-audit.json`.
+```text
+<song.lrc>
+  -> lrc_strip.py + extract_bilingual.py --emit-index   (<song.lrc>.tmp.txt + <workdir>/lyric-index.txt)
+  -> Stage 1 Translator   (roles/translator.md: draft .tmp.txt + proposed stanza groupings)
+  -> Stage 2 Reviewer     (roles/reviewer.md: isolated adversarial falsification review)
+  -> Stage 3 Arbiter      (roles/arbiter.md: final .tmp.txt + sole author of blocks-plan.json; stops before merge)
+  -> extract_bilingual.py (exports timestamp-free <workdir>/bilingual-lyrics.json)
+  -> lrc_merge.py         (occurrence-ordered merge into <song.lrc> & deletes .tmp.txt)
+  -> verify_translation.py (freezes bilingual-lyrics.frozen.json + translation-manifest.json)
+  -> Grammar Child        (scaffold_draft -> enrichment.json -> resolve_spans -> discover_repetitions)
+  -> record_isolation.py (--stage grammar-analysis) -> prepare.py
+  -> Audit Child          (distinct child: audit_summary --emit-template [pending] -> fill report -> validate_audit --check-format)
+  -> record_isolation.py (--stage semantic-audit) -> validate_audit.py (--bilingual + --isolation)
+  -> finalize.py -> validate_all.py (--cleanup-workdir [--archive-proofs <dir>])
+```
 
-The parent never self-audits semantics. Only the deterministic finalizer writes the production sibling JSON.
-
-The production JSON is self-contained. Recipients need only a sibling LRC with the same NFC source text order; timestamps may differ and SakuraUta re-anchors by text. `.grammar-work`, `translated.lrc`, and `translation-manifest.json` are generation/audit artifacts, not distribution requirements. The grammar projection keeps timed title/artist header rows; the App's lyric display still hides them.
-
-Schema v1 is not accepted or migrated. Existing v1 files must be regenerated.
-
-### Discovery
+## Discovery
 
 - Main workflow: `skills/sakurauta-lyrics-workflow/SKILL.md`
-- Existing translator: `skills/lyrics-translator/SKILL.md`
-- Grammar Skill: `skills/lyrics-grammar-sidecar/SKILL.md`
-- Grammar schema: `skills/lyrics-grammar-sidecar/schema/v2/lyrics-grammar-analysis.schema.json`
-- Audit schema: `skills/lyrics-grammar-sidecar/schema/v2/semantic-audit.schema.json`
-- Isolation proof schema: `skills/lyrics-grammar-sidecar/schema/v2/isolation-proof.schema.json`
-- Repetition candidate schema: `skills/lyrics-grammar-sidecar/schema/v2/repetition-candidates.schema.json`
-- Draft contract: `skills/lyrics-grammar-sidecar/references/draft-contract.md`
-- Audit contract: `skills/lyrics-grammar-sidecar/references/semantic-audit-contract.md`
+- Translator skill: `skills/lyrics-translator/SKILL.md`
+- Grammar sidecar skill: `skills/lyrics-grammar-sidecar/SKILL.md`
+- Schemas (`schema/v3/`): `lyrics-grammar-analysis.schema.json`, `bilingual-lyrics.schema.json`, `isolation-proof.schema.json`, `repetition-candidates.schema.json`, `semantic-audit.schema.json`
+- Contracts: `skills/lyrics-grammar-sidecar/references/draft-contract.md`, `skills/lyrics-grammar-sidecar/references/semantic-audit-contract.md`
 - Fixtures: `skills/lyrics-grammar-sidecar/fixtures/`
 
-All three Skill directories can be copied together. The grammar Skill resolves its schemas relative to its own `SKILL.md`.
-
-### Invocation
-
-Set the paths once:
-
-```powershell
-$Skills = "C:\path\to\skills"
-$Workflow = "$Skills\sakurauta-lyrics-workflow"
-$Grammar = "$Skills\lyrics-grammar-sidecar"
-$Work = "C:\Music\Song.grammar-work"
-```
-
-#### 1. Translation child
-
-Dispatch a fresh child (skip if `C:\Music\Song.lrc` is already bilingual):
-
-```text
-Read and follow $Skills\lyrics-translator\SKILL.md.
-Translate C:\Music\Song.lrc into <target language>.
-Do not produce grammar JSON.
-```
-
-The translator strips timestamps, translates pure lyrics in plain text, and merges back into `C:\Music\Song.lrc`.
-
-#### 2. Source projection and freeze
-
-```powershell
-python "$Grammar\scripts\project_source.py" "C:\Music\Song.lrc" `
-  --song-id "<SakuraUta songId>"
-```
-
-The default output is `C:\Music\Song.grammar-work\source-projection.json`.
-
-After user acceptance:
-
-```powershell
-python "$Grammar\scripts\verify_translation.py" `
-  "$Work\source-projection.json" "C:\Music\Song.lrc" `
-  --workdir $Work
-```
-
-#### 3. Fresh grammar child
-
-```text
-Read and follow $Grammar\SKILL.md and
-$Grammar\references\draft-contract.md.
-Read only the original LRC, source projection, and frozen translated.lrc.
-Write <workdir>\semantic-draft.json.
-Run repetition discovery with --in-place after blocks are complete, or copy
-every candidate verbatim into repetitionGroups.
-Do not edit the translation or write <song>.json.
-```
-
-The child may run:
-
-```powershell
-python "$Grammar\scripts\discover_repetitions.py" `
-  "$Work\semantic-draft.json" `
-  --projection "$Work\source-projection.json" `
-  --workdir $Work `
-  --learner-language "<target language>" `
-  --replace --in-place
-```
-
-The child may also run `resolve_spans.py` to automatically verify or fix Unicode code-point spans:
-
-```powershell
-python "$Grammar\scripts\resolve_spans.py" `
-  "$Work\semantic-draft.json" `
-  --projection "$Work\source-projection.json" `
-  --in-place
-```
-
-After the draft is final, record the actual child ID:
-
-```powershell
-python "$Grammar\scripts\record_isolation.py" `
-  "$Work\source-projection.json" `
-  --stage grammar-analysis `
-  --artifact "$Work\semantic-draft.json" `
-  --method native-subagent `
-  --child-transcript-id "<actual-grammar-child-id>" `
-  --parent-transcript-id "<actual-parent-id>" `
-  --output "$Work\isolation-grammar-analysis.json" `
-  --replace
-```
-
-Freeze the candidate:
-
-```powershell
-python "$Grammar\scripts\prepare.py" "C:\Music\Song.lrc" `
-  --projection "$Work\source-projection.json" `
-  --workdir $Work `
-  --learner-language "<target language>"
-```
-
-This writes:
-
-- `analysis-candidate.json`;
-- `analysis-candidate.sha256`;
-- `repetition-candidates.json`;
-- `validation-report.json`.
-
-#### 4. Independent semantic-audit child
-
-Dispatch a different fresh transcript:
-
-```text
-Read and follow $Grammar\references\semantic-audit-contract.md.
-Audit <workdir>\analysis-candidate.json against the original LRC, frozen
-translated.lrc, and its SHA-256. The semantic draft is read-only supporting
-context; the candidate is the reviewed artifact.
-Write only <workdir>\semantic-audit.json.
-Do not edit the candidate, draft, translation, or <song>.json.
-```
-
-Validate the report:
-
-```powershell
-python "$Grammar\scripts\validate_audit.py" `
-  "$Work\analysis-candidate.json" `
-  --candidate-hash "$Work\analysis-candidate.sha256" `
-  --learner-language "<target language>" `
-  "$Work\semantic-audit.json"
-```
-
-Record the audit-child proof:
-
-```powershell
-python "$Grammar\scripts\record_isolation.py" `
-  "$Work\source-projection.json" `
-  --stage semantic-audit `
-  --artifact "$Work\semantic-audit.json" `
-  --method native-subagent `
-  --child-transcript-id "<actual-audit-child-id>" `
-  --parent-transcript-id "<actual-parent-id>" `
-  --output "$Work\isolation-semantic-audit.json" `
-  --replace
-```
-
-The grammar and audit child IDs must differ.
-
-#### 5. Finalize and verify
-
-```powershell
-python "$Grammar\scripts\finalize.py" "C:\Music\Song.lrc" `
-  --projection "$Work\source-projection.json" `
-  --workdir $Work `
-  --learner-language "<target language>"
-
-python "$Grammar\scripts\validate_all.py" `
-  "C:\Music\Song.lrc" "C:\Music\Song.json" `
-  --projection "$Work\source-projection.json" `
-  --workdir $Work `
-  --learner-language "<target language>"
-```
-
-The generated file is always `dirname(lrc) / basename(lrc, ".lrc") + ".json"`. Existing differing output is preserved unless the user explicitly passes `--replace`. An existing Schema v1 production file must be regenerated with `--replace`; it is never read as compatible input.
-
-#### 6. Batch execution mode
-
-When processing multiple LRC files in batch, the CLI scripts and workflow coordinate batch translation with isolated analysis:
-
-```powershell
-# Phase 1: Batch project and batch freeze accepted translations
-python "$Grammar\scripts\project_source.py" "C:\Music\Song1.lrc" "C:\Music\Song2.lrc"
-python "$Grammar\scripts\verify_translation.py" --batch "C:\Music\Song1.lrc" "C:\Music\Song2.lrc"
-
-# Phase 2 & 3: Fresh child isolation is preserved per song; prepare can run in batch:
-python "$Grammar\scripts\prepare.py" "C:\Music\Song1.lrc" "C:\Music\Song2.lrc" --learner-language "<target language>"
-
-# Phase 4: Batch finalization and complete validation
-python "$Grammar\scripts\finalize.py" "C:\Music\Song1.lrc" "C:\Music\Song2.lrc" --learner-language "<target language>"
-python "$Grammar\scripts\validate_all.py" --batch "C:\Music\Song1.lrc" "C:\Music\Song2.lrc" --learner-language "<target language>"
-```
-
-### Hash and Isolation Chain
-
-```text
-source projection
-  -> semantic-draft.json
-  -> analysis-candidate.json
-  -> semantic-audit.json
-  -> isolation proofs(stage, artifactSha256)
-  -> final <song>.json
-```
-
-The grammar proof binds the draft. The audit report binds the candidate hash. The audit proof binds the report. The finalizer rechecks every link before the atomic write.
-
-### Language Contract
-
-Both grammar and audit children receive the same target language. All learner-facing prose must use it. New v2 files record it in `extensions.learnerLanguage`; this field is required. Stable machine identifiers may remain English.
-
-### Verification
+## Verification
 
 Python 3.10+ standard library only:
 
 ```powershell
-python skills\lyrics-grammar-sidecar\scripts\selftest.py
+python -X utf8 skills\lyrics-grammar-sidecar\scripts\selftest.py
 ```
 
-The suite covers ja/ko/zh/en and Unicode fixtures, Schema v2 and v1 rejection, exact maximal NFC repetition, line-boundary variation, cross-line NFC composition, internal whitespace, short/similar non-matches, metadata exclusion, overlapping and three-occurrence groups, changed tails, canonical phrase/meaning inheritance, explicit overrides, meaning coverage, strict JSON, path/HTML guards, independent audit pass/fail, proof/hash/canonical-byte tamper, and atomic finalization.
+Markdown formatting (Prettier):
 
-`fixtures/golden-vectors.json` pins line identity, Unicode spans, and cross-line NFC composition; the compact `fixtures/repetition` case pins the three-occurrence v2 shape for SakuraUta's cross-repository checks. Its full candidate, audit, isolation, and finalize artifacts are generated in temporary workdirs instead of being committed. The fixture's `.gitattributes` keeps the JSON/LRC golden bytes stable across Git checkouts.
+```powershell
+npm run format:md
+npm run check:md
+```

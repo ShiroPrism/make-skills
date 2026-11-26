@@ -90,35 +90,43 @@ def build_original_set(lrc_path: Path) -> set[str]:
     return texts
 
 
-def build_translation_map(txt_path: Path, original_texts: set[str]) -> dict[str, str]:
+def build_translation_queues(txt_path: Path, original_texts: set[str]) -> dict[str, list[str | None]]:
     """
-    Parse the bilingual plain-text file to map { source_text -> translation_text }.
+    Parse the bilingual plain-text file to map each source text to a FIFO queue
+    of translations in occurrence order.
 
     Rules:
     - A line whose stripped content is in original_texts is a source line.
     - The immediately following non-empty, non-original line is its translation.
     - If two consecutive source lines appear (filler / untranslated pass-through),
-      no translation is recorded for the first.
+      None is recorded for that occurrence so later identical occurrences remain aligned.
     """
-    translation_map: dict[str, str] = {}
+    queues: dict[str, list[str | None]] = {}
     lines = txt_path.read_text(encoding='utf-8', errors='ignore').splitlines()
 
     pending_source: str | None = None
     for line in lines:
         text = line.strip()
         if not text:
-            pending_source = None
+            if pending_source is not None:
+                queues.setdefault(pending_source, []).append(None)
+                pending_source = None
             continue
 
         if text in original_texts:
+            if pending_source is not None:
+                queues.setdefault(pending_source, []).append(None)
             pending_source = text
         elif pending_source is not None:
-            translation_map[pending_source] = text
+            queues.setdefault(pending_source, []).append(text)
             pending_source = None
         else:
             pending_source = None
 
-    return translation_map
+    if pending_source is not None:
+        queues.setdefault(pending_source, []).append(None)
+
+    return queues
 
 
 def verify_merged_lrc(lrc_path: Path, force: bool = False) -> tuple[bool, str]:
@@ -194,7 +202,8 @@ def merge_single_file(lrc_path: Path, txt_path: Path, force: bool = False) -> bo
         return False
 
     original_texts = build_original_set(lrc_path)
-    translation_map = build_translation_map(txt_path, original_texts)
+    translation_queues = build_translation_queues(txt_path, original_texts)
+    last_translation: dict[str, str] = {}
 
     lrc_lines = lrc_path.read_text(encoding='utf-8', errors='ignore').splitlines()
     output: list[str] = []
@@ -213,7 +222,14 @@ def merge_single_file(lrc_path: Path, txt_path: Path, force: bool = False) -> bo
         if _is_metadata_tag(line):
             continue
 
-        translation = translation_map.get(text)
+        queue = translation_queues.get(text)
+        if queue:
+            translation = queue.pop(0)
+            if translation is not None:
+                last_translation[text] = translation
+        else:
+            translation = last_translation.get(text)
+
         if translation:
             sep = _timestamp_separator(line)
             for ts in timestamps:

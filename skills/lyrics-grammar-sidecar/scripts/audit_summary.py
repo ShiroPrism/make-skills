@@ -1,67 +1,47 @@
 #!/usr/bin/env python3
-"""Condense semantic candidate review and emit semantic-audit templates.
+"""Condense Schema v3 semantic candidate review and emit semantic-audit templates.
 
-This deterministic tool reads analysis-candidate.json, pairs blocks with frozen
-translated LRC lines, prints a concise block-by-block semantic comparison summary,
-and optionally emits a schema-compliant semantic-audit.json template.
+Reads analysis-candidate.json and pairs lines directly with frozen
+bilingual-lyrics.frozen.json by sourceOrder (zero timestamps).
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 from sidecarlib import (
+    AUDIT_VERSION,
+    SEMANTIC_AUDIT_SCHEMA_ID,
     SidecarError,
     configure_utf8_stdio,
-    parse_lrc_rows,
+    load_bilingual_lyrics,
     read_json,
-    sha256_bytes,
     sha256_file,
     write_json_atomic,
 )
-from v2lib import (
-    AUDIT_VERSION,
-    SEMANTIC_AUDIT_SCHEMA_ID,
+from v3lib import (
     load_frozen_candidate,
     read_candidate_hash,
-    validate_semantic_audit,
 )
 
 
-def extract_translations(translated_lrc_path: Path) -> dict[int, str]:
-    """Extract inserted translated lines mapped by timestamp."""
-    if not translated_lrc_path.is_file():
+def extract_translations_by_order(bilingual_path: Path) -> dict[int, str | None]:
+    """Extract translations keyed strictly by 0-based sourceOrder."""
+    if not bilingual_path.is_file():
         return {}
-    rows = parse_lrc_rows(translated_lrc_path)
-    seen_times: set[int] = set()
-    trans_map: dict[int, str] = {}
-    for r in rows:
-        t = r.timestamps[0] if r.timestamps else 0
-        if t not in seen_times:
-            seen_times.add(t)
-        else:
-            trans_map[t] = r.text
-    return trans_map
-
-
-def format_time_ms(ms: int) -> str:
-    """Format millisecond integer to [MM:SS.xx]."""
-    total_seconds = ms / 1000.0
-    minutes = int(total_seconds // 60)
-    seconds = total_seconds % 60
-    return f"{minutes:02d}:{seconds:05.2f}"
+    bilingual = load_bilingual_lyrics(bilingual_path)
+    return {line["sourceOrder"]: line.get("translation") for line in bilingual["lines"]}
 
 
 def build_audit_summary(
     candidate: dict,
     candidate_hash: str,
-    trans_map: dict[int, str],
+    trans_by_order: dict[int, str | None],
     learner_language: str,
 ) -> tuple[str, dict]:
-    """Generate concise textual summary and base audit report template."""
+    """Generate concise textual summary and base audit report template without timestamps."""
     blocks = candidate.get("blocks", [])
     meaning_units = candidate.get("meaningUnits", [])
     lines = candidate.get("lines", [])
@@ -69,7 +49,6 @@ def build_audit_summary(
     notes = candidate.get("grammarNotes", [])
 
     line_by_id = {l["lineId"]: l for l in lines}
-    mu_by_id = {mu["meaningUnitId"]: mu for mu in meaning_units}
 
     mu_by_occurrence_id: dict[str, dict] = {}
     for mu in meaning_units:
@@ -78,7 +57,6 @@ def build_audit_summary(
             if occ_id:
                 mu_by_occurrence_id[occ_id] = mu
 
-    # Group phrases by (blockId, lineId) and grammarNotes by blockId using Schema v2 fields
     phrases_by_block_line: dict[tuple[str, str], list[dict]] = {}
     for p in phrases:
         seen_keys: set[tuple[str, str]] = set()
@@ -100,9 +78,9 @@ def build_audit_summary(
             notes_by_block.setdefault(bid, []).append(n)
 
     out: list[str] = []
-    song_source = candidate.get("source", {}).get("lrcFile", "unknown")
+    content_hash = candidate.get("source", {}).get("contentHash", "unknown")
     out.append("=" * 72)
-    out.append(f"SEMANTIC AUDIT SUMMARY: {song_source}")
+    out.append(f"SEMANTIC AUDIT SUMMARY (v3): {content_hash[:24]}...")
     out.append(f"Candidate SHA256: {candidate_hash}")
     out.append(
         f"Coverage: {len(lines)} lines | {len(blocks)} blocks | "
@@ -113,35 +91,32 @@ def build_audit_summary(
 
     for idx, b in enumerate(blocks, 1):
         bid = b.get("blockId", f"b_{idx}")
-        start_ms = b.get("startTimeMs", 0)
-        end_ms = b.get("endTimeMs", 0)
         labels = [lbl.get("key") or lbl.get("name", "") for lbl in b.get("labels", [])]
         label_str = f" [{', '.join(filter(None, labels))}]" if labels else ""
 
-        out.append(f"\n--- Block {bid} ({format_time_ms(start_ms)} -> {format_time_ms(end_ms)}){label_str} ---")
+        out.append(f"\n--- Block {bid}{label_str} ---")
 
-        # Lines in this block
-        b_line_ids = b.get("lineIds", [])
-        for lid in b_line_ids:
+        for lid in b.get("lineIds", []):
             line_obj = line_by_id.get(lid)
             if not line_obj:
                 out.append(f"  [{lid}] (Unknown line)")
                 continue
-            t_ms = line_obj.get("timeMs", 0)
+            s_order = line_obj.get("sourceOrder", -1)
             src_text = line_obj.get("text", "")
-            tr_text = trans_map.get(t_ms, "(No frozen translation found)")
-            out.append(f"  {line_obj.get('language', 'src').upper()}: {src_text}")
-            out.append(f"  TR : {tr_text}")
+            if s_order in trans_by_order:
+                raw_tr = trans_by_order[s_order]
+                tr_text = raw_tr if (isinstance(raw_tr, str) and raw_tr.strip()) else "(Untranslated / filler)"
+            else:
+                tr_text = "(No frozen translation found)"
+            out.append(f"  [{lid}] {line_obj.get('language', 'src').upper()}: {src_text}")
+            out.append(f"          TR : {tr_text}")
 
-            line_phrases = phrases_by_block_line.get((bid, lid), [])
-            if line_phrases:
-                for p in line_phrases:
-                    surf = p.get("surface", "")
-                    gloss = p.get("gloss", "")
-                    expl = p.get("explanation", "")
-                    out.append(f"       phrase [{p.get('phraseId', '')}]: {surf} [{gloss}] — {expl}")
+            for p in phrases_by_block_line.get((bid, lid), []):
+                surf = p.get("surface", "")
+                gloss = p.get("gloss", "")
+                expl = p.get("explanation", "")
+                out.append(f"               phrase [{p.get('phraseId', '')}]: {surf} [{gloss}] — {expl}")
 
-        # Block meaning units
         b_parts = b.get("meaning", {}).get("parts", [])
         b_mus: list[dict] = []
         for p in b_parts:
@@ -151,7 +126,6 @@ def build_audit_summary(
                 b_mus.append(mu)
 
         if not b_mus:
-            # Fallback: check occurrences pointing to this blockId
             for mu in meaning_units:
                 for occ in mu.get("occurrences", []):
                     if occ.get("blockId") == bid and mu not in b_mus:
@@ -171,6 +145,14 @@ def build_audit_summary(
             out.append(f"  => NOTE [{note.get('noteId', '')}]{phrase_tag}: {note.get('explanation', '')}")
 
     out.append("\n" + "=" * 72)
+    excluded_reps = candidate.get("extensions", {}).get("excludedRepetitions", [])
+    if isinstance(excluded_reps, list) and excluded_reps:
+        out.append("EXCLUDED REPETITION CANDIDATES (audit each reason):")
+        for item in excluded_reps:
+            if isinstance(item, dict):
+                out.append(f"  - {item.get('repetitionId', '')}: {item.get('reason', '')}")
+        out.append("=" * 72)
+
     out.append("PRE-AUDIT DIAGNOSTICS:")
     uncovered_lines = [l["lineId"] for l in lines if not any(l["lineId"] in b.get("lineIds", []) for b in blocks)]
     if uncovered_lines:
@@ -178,9 +160,52 @@ def build_audit_summary(
     else:
         out.append("  [PASS] All lines are monotonically mapped into blocks.")
 
-    reviewed_block_ids = [b["blockId"] for b in blocks if "blockId" in b]
-    reviewed_mu_ids = [mu["meaningUnitId"] for mu in meaning_units if "meaningUnitId" in mu]
-    out.append(f"  [PASS] {len(reviewed_block_ids)} block IDs and {len(reviewed_mu_ids)} meaning unit IDs mapped.")
+    # Heuristic coverage check: warn if multi-line block MU text is suspiciously short vs combined line translations
+    short_mu_warnings: list[str] = []
+    for b in blocks:
+        bid = b.get("blockId", "")
+        b_lids = b.get("lineIds", [])
+        if len(b_lids) < 2:
+            continue
+        tr_parts = []
+        for lid in b_lids:
+            line_obj = line_by_id.get(lid)
+            if not line_obj:
+                continue
+            tr_val = trans_by_order.get(line_obj.get("sourceOrder", -1))
+            if isinstance(tr_val, str) and tr_val.strip():
+                tr_parts.append(tr_val.strip())
+        if len(tr_parts) < 2:
+            continue
+        combined_tr_len = sum(len(t) for t in tr_parts)
+        mu_texts = []
+        for part in b.get("meaning", {}).get("parts", []):
+            muo_id = part.get("meaningUnitOccurrenceId")
+            mu = mu_by_occurrence_id.get(muo_id)
+            if mu:
+                override_text = None
+                for occ in mu.get("occurrences", []):
+                    if occ.get("occurrenceId") == muo_id:
+                        ov = occ.get("semanticOverride")
+                        if isinstance(ov, dict) and isinstance(ov.get("text"), str):
+                            override_text = ov["text"]
+                        break
+                mu_texts.append(override_text or mu.get("text", ""))
+        combined_mu_len = sum(len(t.strip()) for t in mu_texts)
+        if combined_tr_len >= 16 and combined_mu_len < combined_tr_len * 0.45:
+            short_mu_warnings.append(
+                f"{bid} (MU {combined_mu_len} chars vs {len(tr_parts)} translated lines = {combined_tr_len} chars — verify no line was omitted)"
+            )
+    if short_mu_warnings:
+        for warn in short_mu_warnings:
+            out.append(f"  [WARN] Possible omitted line in block meaning: {warn}")
+    else:
+        out.append("  [PASS] No suspiciously short multi-line block meanings detected.")
+
+    expected_block_ids = [b["blockId"] for b in blocks if "blockId" in b]
+    expected_mu_ids = [mu["meaningUnitId"] for mu in meaning_units if "meaningUnitId" in mu]
+    out.append(f"  [INFO] Expected reviewedBlockIds ({len(expected_block_ids)}): {expected_block_ids}")
+    out.append(f"  [INFO] Expected reviewedMeaningUnitIds ({len(expected_mu_ids)}): {expected_mu_ids}")
     out.append("=" * 72)
 
     template = {
@@ -188,9 +213,9 @@ def build_audit_summary(
         "auditVersion": AUDIT_VERSION,
         "candidateSha256": candidate_hash,
         "learnerLanguage": learner_language,
-        "status": "pass",
-        "reviewedBlockIds": reviewed_block_ids,
-        "reviewedMeaningUnitIds": reviewed_mu_ids,
+        "status": "pending",
+        "reviewedBlockIds": [],
+        "reviewedMeaningUnitIds": [],
         "findings": [],
     }
 
@@ -200,7 +225,7 @@ def build_audit_summary(
 def main() -> int:
     configure_utf8_stdio()
     parser = argparse.ArgumentParser(
-        description="Summarize candidate vs frozen translations and emit audit template."
+        description="Summarize Schema v3 candidate vs frozen bilingual lyrics and emit audit template."
     )
     parser.add_argument(
         "target",
@@ -213,9 +238,9 @@ def main() -> int:
         help="Path to analysis-candidate.sha256 (default: <workdir>/analysis-candidate.sha256)",
     )
     parser.add_argument(
-        "--translated",
+        "--bilingual",
         type=Path,
-        help="Path to translated.lrc (default: <workdir>/translated.lrc)",
+        help="Path to bilingual-lyrics.frozen.json (default: auto-inferred from workdir)",
     )
     parser.add_argument(
         "--learner-language",
@@ -241,9 +266,6 @@ def main() -> int:
         if target.is_dir() or target.name.endswith(".grammar-work"):
             workdir = target
             candidate_path = workdir / "analysis-candidate.json"
-        elif target.name == "analysis-candidate.json":
-            candidate_path = target
-            workdir = target.parent
         else:
             candidate_path = target
             workdir = target.parent
@@ -252,15 +274,18 @@ def main() -> int:
             raise SidecarError("file_not_found", f"Candidate file not found: {candidate_path}")
 
         hash_path = args.candidate_hash.expanduser().resolve() if args.candidate_hash else workdir / "analysis-candidate.sha256"
-
         if hash_path.is_file():
             candidate, candidate_hash = load_frozen_candidate(candidate_path, hash_path)
         else:
             candidate = read_json(candidate_path)
             candidate_hash = sha256_file(candidate_path)
 
-        translated_path = args.translated.expanduser().resolve() if args.translated else workdir / "translated.lrc"
-        trans_map = extract_translations(translated_path) if translated_path.is_file() else {}
+        if args.bilingual:
+            bilingual_path = args.bilingual.expanduser().resolve()
+        else:
+            frozen = workdir / "bilingual-lyrics.frozen.json"
+            bilingual_path = frozen if frozen.is_file() else (workdir / "bilingual-lyrics.json")
+        trans_by_order = extract_translations_by_order(bilingual_path) if bilingual_path.is_file() else {}
 
         learner_lang = (
             args.learner_language
@@ -271,38 +296,57 @@ def main() -> int:
         summary_text, template = build_audit_summary(
             candidate=candidate,
             candidate_hash=candidate_hash,
-            trans_map=trans_map,
+            trans_by_order=trans_by_order,
             learner_language=learner_lang,
         )
 
         print(summary_text)
 
         if args.emit_template:
-            if args.emit_template == Path("default"):
-                emit_path = workdir / "semantic-audit.json"
-            else:
-                emit_path = args.emit_template.expanduser().resolve()
-
+            emit_path = (
+                workdir / "semantic-audit.json"
+                if args.emit_template == Path("default")
+                else args.emit_template.expanduser().resolve()
+            )
             if emit_path.is_file() and not args.replace:
                 print(f"\n[NOTICE] Existing audit report found at {emit_path}. Preserved (use --replace to overwrite).")
             else:
-                issues = validate_semantic_audit(
-                    report=template,
-                    candidate=candidate,
-                    candidate_hash=candidate_hash,
-                    learner_language=learner_lang,
-                )
-                if issues:
-                    print(f"\n[WARN] Generated template has {len(issues)} validation notices:", file=sys.stderr)
-                    for iss in issues:
-                        print(f"  - [{iss.code}] {iss.message}", file=sys.stderr)
+                if emit_path.is_file():
+                    try:
+                        prev_doc = read_json(emit_path)
+                    except SidecarError:
+                        prev_doc = None
+                    if isinstance(prev_doc, dict) and prev_doc.get("status") in ("pass", "fail"):
+                        history_dir = workdir / "audit-history"
+                        history_dir.mkdir(parents=True, exist_ok=True)
+                        prev_hash = str(prev_doc.get("candidateSha256", "unknown"))
+                        short_hash = prev_hash.split(":")[-1][:8] or "unknown"
+                        round_num = len(list(history_dir.glob("semantic-audit-*.json"))) + 1
+                        archive_path = history_dir / f"semantic-audit-r{round_num:02d}-{short_hash}.json"
+                        write_json_atomic(archive_path, prev_doc, replace=True)
+                        print(f"\n[ARCHIVED] Previous audit report saved to: {archive_path}")
+
                 write_json_atomic(emit_path, template, replace=args.replace)
-                print(f"\n[OK] Emitted valid semantic-audit template to: {emit_path}")
-                print("     To fail the audit with findings, edit status to 'fail' and add entries to findings.")
-                print("     To verify, run: python -X utf8 scripts/validate_audit.py ...")
+                validate_script = Path(__file__).resolve().parent / "validate_audit.py"
+                print(f"\n[OK] Emitted pending semantic-audit template to: {emit_path}")
+                print("     Inspect every block & meaningUnit above, then populate reviewedBlockIds,")
+                print("     reviewedMeaningUnitIds, findings, and set status to 'pass' or 'fail'.")
+                print("     Stage A (Audit Child self-check — before isolation proof):")
+                print(
+                    f'       python -X utf8 "{validate_script}" "{candidate_path}" '
+                    f'--candidate-hash "{hash_path}" "{emit_path}" '
+                    f'--learner-language "{learner_lang}" --check-format'
+                )
+                print("     Stage B (Orchestrator full gate — after record_isolation.py --stage semantic-audit):")
+                print(
+                    f'       python -X utf8 "{validate_script}" "{candidate_path}" '
+                    f'--candidate-hash "{hash_path}" "{emit_path}" '
+                    f'--learner-language "{learner_lang}" '
+                    f'--bilingual "{bilingual_path}" '
+                    f'--isolation "{workdir / "isolation-semantic-audit.json"}"'
+                )
 
         return 0
-
     except SidecarError as exc:
         print(f"ERROR [{exc.code}] {exc.path}: {exc.message}", file=sys.stderr)
         return 1

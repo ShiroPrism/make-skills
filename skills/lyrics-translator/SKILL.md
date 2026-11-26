@@ -1,113 +1,68 @@
 ---
 name: lyrics-translator
-description: High-fidelity lyric translation across global languages (dedicated profiles for ZH, JA, KO, EN, FR, ES, DE, IT, PT, RU, TH, VI, YUE, plus generic fallback). Implements an Adversarial 3-Stage Pipeline (Initial Translation → Independent Falsification Review in fresh context → Arbitration & Polish) to eliminate confirmation bias and contextual contradictions like literal idiom traps. Supports single-file and directory-wide sliding-window batch translation. Preserves source lines and inserts exactly one target-language line below each.
+description: High-fidelity lyric translation across global languages (dedicated profiles for ZH, JA, KO, EN, FR, ES, DE, IT, PT, RU, TH, VI, YUE, plus generic fallback). Implements a Single-Draft Adversarial 3-Stage Pipeline (Initial Translation -> Independent Falsification Review in fresh context -> Arbitration & Polish) to eliminate confirmation bias and contextual contradictions like literal idiom traps. Supports single-file and directory-wide batch translation. Preserves source lines and inserts exactly one target-language line below each.
 metadata:
-  version: "3.0.0"
+  version: "3.1.0"
 ---
 
 # Lyric Translator — Adversarial 3-Stage Pipeline
 
-High-fidelity lyric translation across global languages with dedicated linguistic profiles, strict anti-confirmation bias architecture, and deterministic timeline validation.
+High-fidelity lyric translation across global languages using dedicated linguistic profiles, strict anti-confirmation-bias role separation, and deterministic `.lrc` timeline merging.
 
----
+Resolve `<translator-skill>` to the directory containing this `SKILL.md` before running commands.
 
-## Quality-First Philosophy
+## Architecture (Single-Draft 3-Stage Pipeline)
 
-Translating song lyrics differs fundamentally from standard prose: lyrics are cohesive artistic units defined by metaphor, persona, subtext, and rhythmic cadence. Single-agent self-review suffers from severe confirmation bias (e.g., mechanically translating cynical rhetorical questions like 「もういいかい？」 as children's hide-and-seek "藏好了吗？").
+Every song runs through **one** initial translator, **one** isolated adversarial reviewer, and **one** arbiter (never duplicate initial drafts against the same file):
 
-To guarantee maximum quality, this skill enforces a **Three-Stage Adversarial Pipeline (三阶段对冲流水线)** for every song:
-
-```
+```text
 [Original LRC]
       ↓
-[Step 0: lrc_strip.py] → .tmp.txt
+[Step 0: lrc_strip.py] -> <song.lrc>.tmp.txt
       ↓
-[Stage 1: Initial Translator (roles/translator.md)]
-      ↓ (Handover: Draft .tmp.txt + Song Persona Memo)
-[Stage 2: Adversarial Reviewer (roles/reviewer.md)] ⚠️ Clean Isolated Context
-      ↓ (Issue Directives: Mandatory Critical Fixes & Rhythm Suggestions)
-[Stage 3: Arbiter & Finalizer (roles/arbiter.md)]
-      ↓ (Adoption Arbitration + Target Cadence Polish)
-[Step 4: lrc_merge.py] → Final Bilingual LRC [OK]
+[Stage 1: Initial Translator (roles/translator.md)] -> Draft .tmp.txt + Handover Memo
+      ↓
+[Stage 2: Adversarial Reviewer (roles/reviewer.md)] ⚠️ Clean Isolated Context -> Issue Directives
+      ↓
+[Stage 3: Arbiter (roles/arbiter.md)] -> Final .tmp.txt (+ blocks-plan.json if requested by caller)
+      ↓
+[Step 4: lrc_merge.py] -> Final Bilingual LRC [OK] (standalone mode only; workflow callers run extract_bilingual.py first)
 ```
 
----
+- **Shared rules & red lines**: `reference/common.md` (format lock, metadata immunity, filler passthrough, no plot injection).
+- **Language profiles**: `reference/source/{source}.md`, `reference/target/{target}.md` (line length cap & cadence rules; normalize regional tags like `zh-CN` -> `zh.md`, `en-US` -> `en.md`, fallback to `generic.md`), and `reference/pair-exceptions.md`.
+- **Role protocols**: `roles/translator.md`, `roles/reviewer.md`, `roles/arbiter.md`.
 
 ## Translation Mode
 
-Default to **reading mode** unless the user says "翻唱", "cover version", "singable translation", "翻配", or explicitly requests rhyme/rhythm matching.
+Default to **Reading mode** unless the user says "翻唱", "cover version", "singable translation", "翻配", or explicitly asks for rhyme/rhythm matching.
 
 | Mode | Priority | When to Use |
 | :-- | :-- | :-- |
 | **Reading** (default) | Semantic integrity > naturalness > singability | Bilingual subtitles, lyric booklets, foreign song comprehension |
 | **Cover/Singing** | Singability + rhythm + rhyme > literalness | Creating a performable version in the target language |
 
----
+## Standalone vs. Workflow Handoff
 
-## Pipeline Execution Details
+- **Standalone mode** (user only asks to translate `.lrc` / `.txt` files): Stage 3 Arbiter writes finalized `.tmp.txt`, runs `lrc_merge.py`, and verifies `[OK]`. Do not generate `blocks-plan.json`.
+- **Workflow handoff mode** (invoked from `sakurauta-lyrics-workflow` or another pipeline providing `<workdir>/lyric-index.txt`):
+  - Stage 1 Translator proposes stanza groupings in its Handover Memo using `l_001`..`l_NNN` IDs from `<workdir>/lyric-index.txt` (does not write `blocks-plan.json`).
+  - Stage 3 Arbiter is the **sole author** of `<workdir>/blocks-plan.json` and **STOPS before running `lrc_merge.py`** so the orchestrator can extract `bilingual-lyrics.json` from `.tmp.txt` before merging.
 
-### Stage 1: Initial Translation (`roles/translator.md`)
+## Multi-File Batch Orchestration
 
-Dispatched to translate the raw lyrics stripped by `lrc_strip.py`:
-
-1. **Pre-read & Persona**: Reads the full song to establish the 1–2 sentence Song Persona (speaker, listener, emotional arc, register).
-2. **Language Reference Loading**:
-   - `reference/common.md`: Absolute red lines, semantic integrity guards, special line rules.
-   - `reference/source/{source}.md`: Source-specific grammar signals (e.g., Japanese `て`-form chains, omitted subjects).
-   - `reference/target/{target}.md`: Target breath units (4–16 characters for Chinese), register rules.
-   - `reference/pair-exceptions.md`: False-friend kanji/cognates.
-3. **Dual-Track Output**:
-   - **Track 1 (Line-level LRC text)**: Writes the line-by-line translation directly into `.tmp.txt`, adhering strictly to audio sync and line-matching constraints without inverting cross-line word order or leaving dangling line-ending `的`.
-   - **Track 2 (Stanza-level Semantic Chunking & Meaning Plan — Mandatory)**: Writes `<workdir>/blocks-plan.json` to record natural stanza boundaries and coherent literary translations for each block, keeping locked key terms identical to Track 1 and indexing against `source-projection.json` when available.
-4. **Handover**: Outputs the Song Persona memo, handover plan, and flags potential ambiguities for the Reviewer. Do not dump or print full translated lyrics in chat messages (the disk file is authoritative).
-
-### Stage 2: Adversarial Quality Review (`roles/reviewer.md`)
-
-Dispatched as a **completely fresh subagent (clean context window)** with zero memory of the translator's thought process:
-
-1. **Operating Mandate**: Operates under the **Adversarial Falsification Protocol (证伪协议)** — hunting aggressively for errors rather than validating the draft.
-2. **Core Audit Targets**:
-   - **Dictionary First-Sense Traps (首选字面义陷阱)**: Catches idioms or polysemous phrases translated literally that contradict song context (e.g., 「もういいかい？」 as "藏好了吗" vs. cynical "够了吗").
-   - **Contextual Contradictions (语境冲突与因果断裂)**: Catches lines creating emotional or logical breaks with lines $N-2 \dots N+2$.
-   - **Persona & Pronoun Consistency**: Ensures voice stability and eliminates hallucinated subjects.
-   - **Red Lines, Syntax & Weight Traps**: Checks character limits, zero plot injection, dangling line-ending `的` on SOV splits, and weight collapse on multi-syllable hooks.
-   - **Stanza Boundary & Cross-Track Term Alignment**: Audits `<workdir>/blocks-plan.json` to ensure mid-sentence enjambments are never cut across blocks, indices cover `1..lineCount` completely, and Track 1 / Track 2 key terms unify onto the stronger, cadence-matched rendering.
-3. **Output**: Structured Issue Directives categorized into `Critical Defects (Mandatory Fixes)` and `Stylistic Polish`.
-
-### Stage 3: Arbitration, Polish & Final Integration (`roles/arbiter.md`)
-
-Finalizes the translation and guarantees deterministic output:
-
-1. **Arbitration**: Mandatorily adopts all confirmed critical defect fixes; arbitrates stylistic suggestions against the Song Persona.
-2. **Cadence Polish**: Enforces natural target breath groups (4–16 characters for Chinese), eliminates translationese (`的`-chains, dangling line-ending `的`, Europeanized passives), and keeps core hooks unified across both tracks.
-3. **Physical Write**: Commits revised lines back to `.tmp.txt` in a single write pass rather than multi-turn line edits, and writes the finalized, audited `<workdir>/blocks-plan.json` to disk.
-4. **Deterministic Gate**: Runs `python scripts/lrc_merge.py <original.lrc> <translated.tmp.txt>` and verifies console outputs `[OK]`.
-   - **No-Read Verification Principle**: Once `lrc_merge.py` exits 0 with `[OK]`, timeline integrity, line-count parity, and metadata immunity are 100% mathematically proven. Never call file-reading tools on merged `.lrc` files.
-
----
-
-## Multi-File Orchestration (Sliding-Window Pool)
-
-When translating an entire directory, folder, or multiple files, the parent agent acts as a **Sliding-Window Concurrency Pool Coordinator**:
-
-1. **Per-Song Isolation Rule**: Every song is an independent unit. Never mix multiple songs into a single agent's context window. This prevents cross-song style contamination and reviewer attention dilution.
-2. **Concurrency Cap**: Maintain a sliding window of **3–5 concurrent song pipelines**.
-3. **Queue Progression**:
-   - Discover all candidate lyrics files (`*.lrc`, `*.txt`, `*.md`), excluding temporary working files.
-   - Dispatch up to 3–5 songs into their respective 3-Stage Pipelines.
-   - As each song completes Stage 3 and passes `lrc_merge.py`, immediately pop the next queued song into the active pool.
-4. **Final Summary**: Once all queued songs complete, aggregate results into a final markdown delivery table showing each file, persona, lines translated, key corrections adopted, and `[OK]` merge status.
-
----
+- **Per-song isolation**: Keep each song in its own isolated child contexts; never mix multiple songs into one prompt.
+- **Slot-aware concurrency**: Calculate active song pipelines from the runtime's available subagent slots (typically 1–2 concurrent songs in a 4-slot environment; prioritize finishing one song at a time when slots are limited). Never exceed available slots.
+- **No-Read Verification**: Once `lrc_merge.py` exits 0 with `[OK]`, timeline alignment and occurrence-ordered pairing are verified; do not re-read the merged `.lrc`.
 
 ## Commands
 
 ```powershell
-# Strip timestamps to create same-directory .tmp.txt working files:
-python <skill-root>/scripts/lrc_strip.py <input.lrc> [<output.tmp.txt>]
-python <skill-root>/scripts/lrc_strip.py <input1.lrc> <input2.lrc> ...
+# Strip timestamps to create <input.lrc>.tmp.txt:
+python -X utf8 "<translator-skill>/scripts/lrc_strip.py" "<input.lrc>" ["<output.tmp.txt>"]
+python -X utf8 "<translator-skill>/scripts/lrc_strip.py" "<input1.lrc>" "<input2.lrc>" ...
 
-# Merge translations back into .lrc & deterministically verify:
-python <skill-root>/scripts/lrc_merge.py <original.lrc> [<translated.tmp.txt>]
-python <skill-root>/scripts/lrc_merge.py <original1.lrc> <original2.lrc> ...
+# Merge translations back into .lrc (occurrence-ordered for repeated lines) & verify [OK]:
+python -X utf8 "<translator-skill>/scripts/lrc_merge.py" "<original.lrc>" ["<translated.tmp.txt>"]
+python -X utf8 "<translator-skill>/scripts/lrc_merge.py" "<original1.lrc>" "<original2.lrc>" ...
 ```

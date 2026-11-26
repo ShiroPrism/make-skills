@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Schema v2 validation, repetition discovery, audit gates, and finalization."""
+"""Schema v3 validation, repetition discovery, audit gates, and finalization."""
 
 from __future__ import annotations
 
@@ -41,20 +41,18 @@ from sidecarlib import (
     _write_bytes_atomic,
     assert_distinct_paths,
     canonical_json,
+    compute_content_hash,
     ensure_inside_workdir,
-    ensure_local_lrc,
     grammar_line_fingerprint,
     grammar_line_id,
     json_value_issues,
-    load_projection,
-    lrc_basename_issues,
+    load_bilingual_lyrics,
     parse_json_bytes,
     pretty_json,
     read_json,
     sha256_bytes,
     sha256_file,
-    verify_frozen_translation,
-    verify_source_matches_projection,
+    verify_frozen_bilingual,
     write_json_atomic,
 )
 
@@ -102,10 +100,10 @@ class OccurrenceRange:
 
 
 def schema_path(name: str = "lyrics-grammar-analysis.schema.json") -> Path:
-    return Path(__file__).resolve().parents[1] / "schema" / "v2" / name
+    return Path(__file__).resolve().parents[1] / "schema" / "v3" / name
 
 
-def load_v2_schema(name: str = "lyrics-grammar-analysis.schema.json") -> dict[str, Any]:
+def load_v3_schema(name: str = "lyrics-grammar-analysis.schema.json") -> dict[str, Any]:
     schema = read_json(schema_path(name))
     issues = _walk_schema(schema)
     if issues:
@@ -118,13 +116,12 @@ def _schema_issues(
     schema_name: str,
     path: str = "$",
 ) -> list[Issue]:
-    # Imported lazily to keep this module's public dependency surface small.
     from sidecarlib import validate_schema_instance
 
     value_issues = json_value_issues(value, path=path)
     if value_issues:
         return value_issues
-    schema = load_v2_schema(schema_name)
+    schema = load_v3_schema(schema_name)
     return validate_schema_instance(value, schema, path=path)
 
 
@@ -170,10 +167,7 @@ def _iter_learner_text(document: dict[str, Any]) -> Iterable[tuple[str, str, str
     def iter_label_displays(value: Any, path: str = "$") -> Iterable[tuple[str, str, str]]:
         if isinstance(value, dict):
             display = value.get("display")
-            if (
-                {"namespace", "key"}.issubset(value)
-                and isinstance(display, str)
-            ):
+            if {"namespace", "key"}.issubset(value) and isinstance(display, str):
                 yield path + ".display", display, "label_display"
             for key, child in value.items():
                 yield from iter_label_displays(child, f"{path}.{key}")
@@ -259,12 +253,7 @@ def _iter_learner_text(document: dict[str, Any]) -> Iterable[tuple[str, str, str
                     override = occurrence.get("semanticOverride")
                     if not isinstance(override, dict):
                         continue
-                    for key in (
-                        "reason",
-                        "explanation",
-                        "gloss",
-                        "notes",
-                    ):
+                    for key in ("reason", "explanation", "gloss", "notes"):
                         value = override.get(key)
                         if isinstance(value, str):
                             yield (
@@ -312,8 +301,20 @@ def _iter_learner_text(document: dict[str, Any]) -> Iterable[tuple[str, str, str
                             "alternatives",
                         )
 
+    extensions = document.get("extensions")
+    if isinstance(extensions, dict):
+        excluded = extensions.get("excludedRepetitions")
+        if isinstance(excluded, list):
+            for idx, item in enumerate(excluded):
+                if isinstance(item, dict) and isinstance(item.get("reason"), str):
+                    yield (
+                        f"$.extensions.excludedRepetitions[{idx}].reason",
+                        item["reason"],
+                        "override",
+                    )
 
-def validate_learner_language_v2(
+
+def validate_learner_language_v3(
     document: Any,
     expected_language: str | None,
 ) -> list[Issue]:
@@ -331,7 +332,7 @@ def validate_learner_language_v2(
             Issue(
                 "missing_learner_language",
                 "$.extensions.learnerLanguage",
-                "Schema v2 requires extensions.learnerLanguage.",
+                "Schema v3 requires extensions.learnerLanguage.",
             )
         )
     elif expected is not None and actual != expected:
@@ -432,9 +433,7 @@ def _build_block_view(
         line_indexes[line.line_id] = index
         raw_parts.append(line.raw_text)
     raw_text = "".join(raw_parts)
-    normalized_text, raw_to_normalized, normalized_to_raw = _normalization_maps(
-        raw_text
-    )
+    normalized_text, raw_to_normalized, normalized_to_raw = _normalization_maps(raw_text)
     return BlockView(
         block_id=block["blockId"],
         line_ids=line_ids,
@@ -714,8 +713,6 @@ def _check_html_and_paths(document: dict[str, Any], issues: list[Issue]) -> None
             or HTML_ENTITY_RE.search(text)
         ):
             issues.append(Issue("html_content", path, "Inline HTML is not allowed."))
-        if path.endswith(".lrcFile") and ("/" in text or "\\" in text):
-            issues.append(Issue("absolute_path", path, "lrcFile must be a basename."))
         pathish = "path" in lower_path or "file" in lower_path
         if (
             WINDOWS_ABSOLUTE_PATH_RE.search(text)
@@ -733,12 +730,6 @@ def _check_html_and_paths(document: dict[str, Any], issues: list[Issue]) -> None
                     "Translation-bearing fields are not allowed in the analysis sidecar.",
                 )
             )
-
-
-def _check_source_filename(source: Any, issues: list[Issue]) -> None:
-    if not isinstance(source, dict):
-        return
-    issues.extend(lrc_basename_issues(source.get("lrcFile"), "$.source.lrcFile"))
 
 
 def _collect_global_ids(document: dict[str, Any], issues: list[Issue]) -> None:
@@ -793,12 +784,10 @@ def _collect_global_ids(document: dict[str, Any], issues: list[Issue]) -> None:
 
 def _validate_source_and_lines(
     document: dict[str, Any],
-    projection: dict[str, Any] | None,
-    expected_lrc_file: str | None,
+    bilingual: dict[str, Any] | None,
     issues: list[Issue],
 ) -> tuple[dict[str, dict[str, Any]], dict[str, NormalizedLine]]:
     source = document.get("source")
-    _check_source_filename(source, issues)
     if not isinstance(source, dict):
         return {}, {}
 
@@ -817,27 +806,6 @@ def _validate_source_and_lines(
             )
         language_set = {item for item in source_languages if isinstance(item, str)}
 
-    lrc_file = source.get("lrcFile")
-    if isinstance(lrc_file, str):
-        if "/" in lrc_file or "\\" in lrc_file:
-            issues.append(
-                Issue("absolute_path", "$.source.lrcFile", "lrcFile must be a basename.")
-            )
-        if expected_lrc_file is not None and lrc_file != expected_lrc_file:
-            issues.append(
-                Issue(
-                    "lrc_file_mismatch",
-                    "$.source.lrcFile",
-                    f"Expected {expected_lrc_file}, got {lrc_file}.",
-                )
-            )
-
-    song_id = source.get("songId")
-    if isinstance(song_id, str) and not song_id.strip():
-        issues.append(
-            Issue("invalid_song_id", "$.source.songId", "songId must not be blank.")
-        )
-
     lines_list = document.get("lines")
     if not isinstance(lines_list, list):
         return {}, {}
@@ -849,11 +817,13 @@ def _validate_source_and_lines(
                 "source.lineCount must equal the number of source lines.",
             )
         )
+
     lines_by_id: dict[str, dict[str, Any]] = {}
     normalized_by_id: dict[str, NormalizedLine] = {}
     source_orders: set[int] = set()
-    line_times: set[int] = set()
     array_orders: list[int] = []
+    texts_in_order: list[str] = []
+
     for index, line in enumerate(lines_list):
         if not isinstance(line, dict):
             continue
@@ -874,17 +844,6 @@ def _validate_source_and_lines(
                     Issue("duplicate_source_order", path + ".sourceOrder", "Duplicate sourceOrder.")
                 )
             source_orders.add(source_order)
-        time_ms = line.get("timeMs")
-        if isinstance(time_ms, int) and not isinstance(time_ms, bool):
-            if time_ms in line_times:
-                issues.append(
-                    Issue(
-                        "duplicate_timestamp",
-                        path + ".timeMs",
-                        "Source lines must contain unique projected timestamps.",
-                    )
-                )
-            line_times.add(time_ms)
         text = line.get("text")
         language = line.get("language")
         if isinstance(language, str) and language_set and language not in language_set:
@@ -897,6 +856,7 @@ def _validate_source_and_lines(
             )
         if not isinstance(text, str) or not text:
             continue
+        texts_in_order.append(text)
         if line.get("fingerprint") != grammar_line_fingerprint(text):
             issues.append(
                 Issue(
@@ -905,19 +865,12 @@ def _validate_source_and_lines(
                     "Line fingerprint is not canonical for its source text.",
                 )
             )
-        if (
-            isinstance(song_id, str)
-            and song_id.strip()
-            and isinstance(line_id, str)
-            and isinstance(time_ms, int)
-            and not isinstance(time_ms, bool)
-            and line_id != grammar_line_id(song_id, time_ms, 0, text)
-        ):
+        if isinstance(line_id, str) and line_id != grammar_line_id(index):
             issues.append(
                 Issue(
                     "invalid_line_id",
                     path + ".lineId",
-                    "Line ID is not canonical for its song, timestamp, and text.",
+                    f"Expected canonical 1-based lineId {grammar_line_id(index)}.",
                 )
             )
         if isinstance(line_id, str):
@@ -976,72 +929,65 @@ def _validate_source_and_lines(
             )
         )
 
-    if projection is not None:
-        if source.get("songId") != projection.get("songId"):
+    if len(texts_in_order) == len(lines_list) and texts_in_order:
+        expected_hash = compute_content_hash(texts_in_order)
+        if source.get("contentHash") != expected_hash:
             issues.append(
                 Issue(
-                    "source_song_mismatch",
-                    "$.source.songId",
-                    "Sidecar songId does not match the source projection.",
+                    "invalid_content_hash",
+                    "$.source.contentHash",
+                    "source.contentHash does not match canonical NFC line texts.",
                 )
             )
-        if source.get("lrcProjectionHash") != projection.get("lrcProjectionHash"):
+
+    if bilingual is not None:
+        if source.get("contentHash") != bilingual.get("contentHash"):
             issues.append(
                 Issue(
-                    "stale_projection_hash",
-                    "$.source.lrcProjectionHash",
-                    "Sidecar projection hash does not match the accepted projection.",
+                    "stale_content_hash",
+                    "$.source.contentHash",
+                    "Sidecar contentHash does not match the accepted bilingual lyrics.",
                 )
             )
-        if source.get("lineCount") != projection.get("lineCount"):
+        if source.get("lineCount") != bilingual.get("lineCount"):
             issues.append(
                 Issue(
                     "line_count_mismatch",
                     "$.source.lineCount",
-                    "Sidecar lineCount does not match the source projection.",
+                    "Sidecar lineCount does not match the accepted bilingual lyrics.",
                 )
             )
-        if projection.get("lrcFile") is not None and source.get("lrcFile") != projection.get(
-            "lrcFile"
-        ):
-            issues.append(
-                Issue(
-                    "lrc_file_mismatch",
-                    "$.source.lrcFile",
-                    "Sidecar lrcFile does not match the source projection.",
-                )
-            )
-        projected_lines = projection.get("lines", [])
-        projected_by_id = {
-            item["lineId"]: item for item in projected_lines if isinstance(item, dict)
+        bilingual_lines = bilingual.get("lines", [])
+        bilingual_by_id = {
+            item["lineId"]: item for item in bilingual_lines if isinstance(item, dict)
         }
-        if len(lines_list) != len(projected_lines):
+        if len(lines_list) != len(bilingual_lines):
             issues.append(
                 Issue(
                     "line_coverage",
                     "$.lines",
-                    f"Expected {len(projected_lines)} lines, got {len(lines_list)}.",
+                    f"Expected {len(bilingual_lines)} lines, got {len(lines_list)}.",
                 )
             )
-        for index, projected in enumerate(projected_lines):
-            line_id = projected["lineId"]
+        for index, expected in enumerate(bilingual_lines):
+            line_id = expected["lineId"]
             actual = lines_by_id.get(line_id)
             if actual is None:
                 issues.append(
                     Issue(
                         "line_coverage",
                         f"$.lines[{index}]",
-                        f"Missing projected source line: {line_id}",
+                        f"Missing source line: {line_id}",
                     )
                 )
                 continue
-            for field in ("lineId", "sourceOrder", "timeMs", "text", "fingerprint"):
-                if actual.get(field) != projected[field]:
+            for field in ("lineId", "sourceOrder", "text", "fingerprint"):
+                if actual.get(field) != expected[field]:
                     issues.append(
                         Issue(
-                            "stale_source_projection",
+                            "stale_source_content",
                             f"$.lines[{index}].{field}",
-                            f"Line {field} does not match the source projection.",
+                            f"Line {field} does not match the accepted bilingual lyrics.",
                         )
                     )
             if actual.get("role") != "text":
@@ -1053,29 +999,14 @@ def _validate_source_and_lines(
                     )
                 )
         for line_id, actual in lines_by_id.items():
-            if line_id not in projected_by_id:
+            if line_id not in bilingual_by_id:
                 issues.append(
                     Issue(
                         "unknown_source_line",
                         f"$.lines[{actual.get('sourceOrder', '?')}]",
-                        f"Sidecar line is absent from the source projection: {line_id}",
+                        f"Sidecar line is absent from bilingual lyrics: {line_id}",
                     )
                 )
-    else:
-        ordered: list[int] = []
-        for line in lines_by_id.values():
-            source_order = line.get("sourceOrder")
-            if isinstance(source_order, int) and not isinstance(source_order, bool):
-                ordered.append(source_order)
-        ordered.sort()
-        if ordered != list(range(len(lines_list))):
-            issues.append(
-                Issue(
-                    "non_canonical_source_order",
-                    "$.lines",
-                    "Line sourceOrder values must be unique and contiguous from zero.",
-                )
-            )
     return lines_by_id, normalized_by_id
 
 
@@ -1089,11 +1020,11 @@ def _validate_blocks(
     dict[str, dict[str, Any]],
     dict[str, BlockView],
 ]:
-    blocks_list = [
-        block
-        for block in document.get("blocks", [])
-        if isinstance(block, dict)
-    ] if isinstance(document.get("blocks"), list) else []
+    blocks_list = (
+        [block for block in document.get("blocks", []) if isinstance(block, dict)]
+        if isinstance(document.get("blocks"), list)
+        else []
+    )
     blocks_by_id: dict[str, dict[str, Any]] = {}
     views: dict[str, BlockView] = {}
     covered_lines: set[str] = set()
@@ -1118,11 +1049,7 @@ def _validate_blocks(
             continue
         if _has_duplicates(line_ids):
             issues.append(
-                Issue(
-                    "duplicate_block_line",
-                    path + ".lineIds",
-                    "Block lineIds must be unique.",
-                )
+                Issue("duplicate_block_line", path + ".lineIds", "Block lineIds must be unique.")
             )
         for line_index, line_id in enumerate(line_ids):
             if not isinstance(line_id, str):
@@ -1154,32 +1081,7 @@ def _validate_blocks(
                     "Block lineIds do not follow sourceOrder.",
                 )
             )
-        start_time = block.get("startTimeMs")
-        end_time = block.get("endTimeMs")
-        if (
-            isinstance(start_time, int)
-            and not isinstance(start_time, bool)
-            and isinstance(end_time, int)
-            and not isinstance(end_time, bool)
-        ):
-            if end_time < start_time:
-                issues.append(
-                    Issue("invalid_time_range", path, "Block endTimeMs precedes startTimeMs.")
-                )
-            for line in resolved_lines:
-                line_time = line.get("timeMs")
-                if (
-                    isinstance(line_time, int)
-                    and not isinstance(line_time, bool)
-                    and not (start_time <= line_time <= end_time)
-                ):
-                    issues.append(
-                        Issue(
-                            "block_time_coverage",
-                            path,
-                            f"Block time range excludes line {line.get('lineId')}.",
-                        )
-                    )
+
         if isinstance(block_id, str) and len(block_line_ids) == len(line_ids):
             view = _build_block_view(block, lines_by_id, normalized_by_id)
             if view is None:
@@ -1306,9 +1208,7 @@ def _validate_repetition_groups(
                     )
                 )
                 continue
-            resolved = _occurrence_range(
-                occurrence, view, lines_by_id, occ_path, issues
-            )
+            resolved = _occurrence_range(occurrence, view, lines_by_id, occ_path, issues)
             if resolved is None:
                 continue
             if len(resolved.normalized_text) < MIN_REPETITION_CODE_POINTS:
@@ -1401,9 +1301,7 @@ def _validate_meaning_units(
                     )
                 )
                 continue
-            resolved = _occurrence_range(
-                occurrence, view, lines_by_id, occ_path, issues
-            )
+            resolved = _occurrence_range(occurrence, view, lines_by_id, occ_path, issues)
             if resolved is None:
                 continue
             occurrence_id = occurrence.get("occurrenceId")
@@ -1466,9 +1364,7 @@ def _validate_phrases(
                     )
                 )
                 continue
-            resolved = _occurrence_range(
-                occurrence, view, lines_by_id, occ_path, issues
-            )
+            resolved = _occurrence_range(occurrence, view, lines_by_id, occ_path, issues)
             if resolved is None:
                 continue
             source_text = "".join(
@@ -1620,9 +1516,7 @@ def _validate_block_meanings(
                     )
                 )
             previous_effective_text = current_effective_text
-            resolved.append(
-                (occurrence_range.start, occurrence_range.end, occurrence_id)
-            )
+            resolved.append((occurrence_range.start, occurrence_range.end, occurrence_id))
 
         previous_end = -1
         for index, (start, end, _occurrence_id) in enumerate(resolved):
@@ -1744,8 +1638,7 @@ def _validate_scope(
     occurrence_map = {
         occurrence["occurrenceId"]: occurrence
         for occurrence in phrase_occurrences
-        if isinstance(occurrence, dict)
-        and isinstance(occurrence.get("occurrenceId"), str)
+        if isinstance(occurrence, dict) and isinstance(occurrence.get("occurrenceId"), str)
     }
     for block_id in resolved_blocks:
         if not any(
@@ -1815,9 +1708,7 @@ def _validate_notes_and_uncertainties(
                 continue
             path = f"$.grammarNotes[{index}]"
             _check_labels(note.get("labels"), path + ".labels", issues)
-            _validate_scope(
-                note.get("scope"), path + ".scope", blocks_by_id, phrases, issues
-            )
+            _validate_scope(note.get("scope"), path + ".scope", blocks_by_id, phrases, issues)
     uncertainties = document.get("uncertainties")
     if isinstance(uncertainties, list):
         for index, uncertainty in enumerate(uncertainties):
@@ -1892,14 +1783,13 @@ def _validate_shared_occurrences(
                     )
 
 
-def validate_grammar_analysis_v2(
+def validate_grammar_analysis_v3(
     document: Any,
-    projection: dict[str, Any] | None = None,
-    expected_lrc_file: str | None = None,
-    require_projection: bool = False,
+    bilingual: dict[str, Any] | None = None,
+    require_bilingual: bool = False,
     learner_language: str | None = None,
 ) -> list[Issue]:
-    """Validate a Schema v2 analysis without running repetition discovery."""
+    """Validate a Schema v3 analysis without running repetition discovery."""
 
     if not isinstance(document, dict):
         return [Issue("invalid_sidecar", "$", "Sidecar must be a JSON object.")]
@@ -1914,9 +1804,9 @@ def validate_grammar_analysis_v2(
     if document.get("schemaVersion") != SCHEMA_VERSION:
         found = document.get("schemaVersion")
         message = (
-            f"Schema v{found} is not supported; regenerate a Schema v2 sidecar."
+            f"Schema v{found} is not supported; Schema v3 is required."
             if found is not None
-            else "Schema v2 is required; regenerate the sidecar."
+            else "Schema v3 is required; regenerate the sidecar."
         )
         return [Issue("unsupported_schema_version", "$.schemaVersion", message)]
 
@@ -1924,7 +1814,7 @@ def validate_grammar_analysis_v2(
     if value_issues:
         return value_issues
 
-    schema = load_v2_schema()
+    schema = load_v3_schema()
     schema_issues = _walk_schema(schema)
     if schema_issues:
         return schema_issues
@@ -1938,7 +1828,7 @@ def validate_grammar_analysis_v2(
     _validate_override_rules(document, issues)
     _collect_global_ids(document, issues)
     lines_by_id, normalized_by_id = _validate_source_and_lines(
-        document, projection, expected_lrc_file, issues
+        document, bilingual, issues
     )
     blocks_list, blocks_by_id, views = _validate_blocks(
         document, lines_by_id, normalized_by_id, issues
@@ -1970,19 +1860,19 @@ def validate_grammar_analysis_v2(
         issues,
     )
 
-    if require_projection and projection is None:
+    if require_bilingual and bilingual is None:
         issues.append(
             Issue(
-                "missing_projection",
-                "$.source.lrcProjectionHash",
-                "Offline verification requires the frozen source projection.",
+                "missing_bilingual_lyrics",
+                "$.source.contentHash",
+                "Offline verification requires the frozen bilingual-lyrics.json.",
             )
         )
-    issues.extend(validate_learner_language_v2(document, learner_language))
+    issues.extend(validate_learner_language_v3(document, learner_language))
     return issues
 
 
-def ensure_v2_document(document: Any) -> None:
+def ensure_v3_document(document: Any) -> None:
     if not isinstance(document, dict) or document.get("schema") != SIDECAR_SCHEMA_ID:
         raise _error("invalid_sidecar", "$", "Expected a lyrics grammar analysis sidecar.")
     if document.get("schemaVersion") != SCHEMA_VERSION:
@@ -1990,15 +1880,15 @@ def ensure_v2_document(document: Any) -> None:
         raise _error(
             "unsupported_schema_version",
             "$.schemaVersion",
-            f"Schema v{found} is not supported; regenerate a Schema v2 sidecar.",
+            f"Schema v{found} is not supported; Schema v3 is required.",
         )
 
 
 def normalized_analysis_candidate(
     draft: dict[str, Any],
-    projection: dict[str, Any],
+    bilingual: dict[str, Any],
 ) -> dict[str, Any]:
-    """Rebuild source identity fields and retain only Schema v2 semantic data."""
+    """Rebuild pure-content source fields and retain only Schema v3 semantic data."""
 
     draft_lines = draft.get("lines")
     if not isinstance(draft_lines, list):
@@ -2009,7 +1899,7 @@ def normalized_analysis_candidate(
         if isinstance(line, dict) and isinstance(line.get("lineId"), str)
     }
     normalized_lines: list[dict[str, Any]] = []
-    for projected in projection["lines"]:
+    for projected in bilingual["lines"]:
         line = lines_by_id.get(projected["lineId"])
         if line is None:
             raise _error(
@@ -2020,14 +1910,11 @@ def normalized_analysis_candidate(
         normalized: dict[str, Any] = {
             "lineId": projected["lineId"],
             "sourceOrder": projected["sourceOrder"],
-            "timeMs": projected["timeMs"],
             "text": projected["text"],
             "fingerprint": projected["fingerprint"],
             "role": "text",
             "language": line["language"],
         }
-        if "endTimeMs" in line:
-            normalized["endTimeMs"] = line["endTimeMs"]
         if "languageSpans" in line:
             normalized["languageSpans"] = line["languageSpans"]
         normalized_lines.append(normalized)
@@ -2037,11 +1924,9 @@ def normalized_analysis_candidate(
         "schema": SIDECAR_SCHEMA_ID,
         "schemaVersion": SCHEMA_VERSION,
         "source": {
-            "lrcFile": projection.get("lrcFile") or source["lrcFile"],
-            "songId": projection["songId"],
             "sourceLanguages": sorted(set(source["sourceLanguages"])),
-            "lineCount": projection["lineCount"],
-            "lrcProjectionHash": projection["lrcProjectionHash"],
+            "lineCount": bilingual["lineCount"],
+            "contentHash": bilingual["contentHash"],
         },
         "lines": normalized_lines,
         "repetitionGroups": draft["repetitionGroups"],
@@ -2177,13 +2062,9 @@ def _group_candidate_matches(
     return [
         {
             "text": text,
-            "ranges": {
-                block_id: min(spans)
-                for block_id, spans in spans_by_block.items()
-            },
+            "ranges": {block_id: min(spans) for block_id, spans in spans_by_block.items()},
             "all_ranges": {
-                block_id: sorted(set(spans))
-                for block_id, spans in spans_by_block.items()
+                block_id: sorted(set(spans)) for block_id, spans in spans_by_block.items()
             },
         }
         for text, spans_by_block in matches_by_text.items()
@@ -2238,10 +2119,7 @@ def _learning_block_views(
     document: dict[str, Any],
     lines_by_id: dict[str, dict[str, Any]],
 ) -> list[BlockView]:
-    normalized = {
-        line_id: _normalized_line(line)
-        for line_id, line in lines_by_id.items()
-    }
+    normalized = {line_id: _normalized_line(line) for line_id, line in lines_by_id.items()}
     result: list[BlockView] = []
     blocks = document.get("blocks")
     if not isinstance(blocks, list):
@@ -2255,28 +2133,135 @@ def _learning_block_views(
     return result
 
 
+def _is_ascii_word_char(ch: str) -> bool:
+    return ch.isascii() and ch.isalnum()
+
+
+def _trim_spurious_boundaries(
+    left: BlockView,
+    right: BlockView,
+    l_start: int,
+    l_end: int,
+    r_start: int,
+    r_end: int,
+    lines_by_id: dict[str, dict[str, Any]],
+    minimum: int,
+) -> tuple[int, int, int, int] | None:
+    """Trim mid-ASCII-word cuts and 1-char stray cross-line bleeds from a maximal match."""
+    lt = left.normalized_text
+    rt = right.normalized_text
+
+    # Trim mid-ASCII-word start/end on either side
+    while l_start < l_end and (
+        (l_start > 0 and _is_ascii_word_char(lt[l_start - 1]) and _is_ascii_word_char(lt[l_start]))
+        or (r_start > 0 and _is_ascii_word_char(rt[r_start - 1]) and _is_ascii_word_char(rt[r_start]))
+    ):
+        l_start += 1
+        r_start += 1
+
+    while l_end > l_start and (
+        (l_end < len(lt) and _is_ascii_word_char(lt[l_end - 1]) and _is_ascii_word_char(lt[l_end]))
+        or (r_end < len(rt) and _is_ascii_word_char(rt[r_end - 1]) and _is_ascii_word_char(rt[r_end]))
+    ):
+        l_end -= 1
+        r_end -= 1
+
+    if l_end - l_start < minimum:
+        return None
+
+    # Trim 1-character stray cross-line bleeds on multi-line spans
+    for _ in range(2):
+        l_segs = _source_segments_for_range(left, l_start, l_end)
+        r_segs = _source_segments_for_range(right, r_start, r_end)
+        if l_segs is None or r_segs is None:
+            return None
+        trimmed = False
+        for segs in (l_segs, r_segs):
+            if len(segs) >= 2:
+                first_text = lines_by_id[segs[0]["lineId"]]["text"]
+                if len(first_text) > 1 and segs[0]["start"] == len(first_text) - 1:
+                    l_start += 1
+                    r_start += 1
+                    trimmed = True
+                    break
+                last_text = lines_by_id[segs[-1]["lineId"]]["text"]
+                if len(last_text) > 1 and segs[-1]["end"] == 1:
+                    l_end -= 1
+                    r_end -= 1
+                    trimmed = True
+                    break
+        if l_end - l_start < minimum:
+            return None
+        if not trimmed:
+            break
+
+    return l_start, l_end, r_start, r_end
+
+
+def _extract_excluded_repetitions(
+    document: dict[str, Any],
+    candidate_ids: set[str],
+) -> tuple[set[str], list[Issue]]:
+    """Validate and return explicitly excluded repetitionIds from extensions.excludedRepetitions."""
+    extensions = document.get("extensions")
+    if not isinstance(extensions, dict) or "excludedRepetitions" not in extensions:
+        return set(), []
+    raw = extensions["excludedRepetitions"]
+    if not isinstance(raw, list):
+        return set(), [
+            Issue(
+                "invalid_excluded_repetitions",
+                "$.extensions.excludedRepetitions",
+                "extensions.excludedRepetitions must be an array.",
+            )
+        ]
+    excluded_ids: set[str] = set()
+    issues: list[Issue] = []
+    for idx, entry in enumerate(raw):
+        path = f"$.extensions.excludedRepetitions[{idx}]"
+        if not isinstance(entry, dict):
+            issues.append(Issue("invalid_excluded_repetitions", path, "Exclusion entry must be an object."))
+            continue
+        rep_id = entry.get("repetitionId")
+        reason = entry.get("reason")
+        if not isinstance(rep_id, str) or not rep_id.strip():
+            issues.append(Issue("invalid_excluded_repetitions", f"{path}.repetitionId", "repetitionId is required."))
+            continue
+        if not isinstance(reason, str) or not reason.strip():
+            issues.append(Issue("invalid_excluded_repetitions", f"{path}.reason", "Non-empty exclusion reason is required."))
+            continue
+        if rep_id not in candidate_ids:
+            issues.append(
+                Issue(
+                    "unknown_excluded_repetition",
+                    f"{path}.repetitionId",
+                    f"Excluded repetitionId {rep_id!r} does not match any discovered candidate.",
+                )
+            )
+            continue
+        excluded_ids.add(rep_id)
+    return excluded_ids, issues
+
+
 def discover_repetition_candidates(
     document: dict[str, Any],
-    projection: dict[str, Any],
+    bilingual: dict[str, Any],
     *,
     learner_language: str | None = None,
 ) -> dict[str, Any]:
     """Return deterministic maximal exact repetition candidates."""
 
-    issues = validate_grammar_analysis_v2(
+    issues = validate_grammar_analysis_v3(
         document,
-        projection=projection,
-        expected_lrc_file=projection.get("lrcFile"),
-        require_projection=True,
+        bilingual=bilingual,
+        require_bilingual=True,
         learner_language=learner_language,
     )
     if issues:
         raise _error(issues[0].code, issues[0].path, issues[0].message)
 
     lines_by_id = {
-        line["lineId"]: line
-        for line in document["lines"]
-        if isinstance(line, dict)
+        line["lineId"]: line for line in document["lines"] if isinstance(line, dict)
     }
     views = _learning_block_views(document, lines_by_id)
     views.sort(
@@ -2289,13 +2274,27 @@ def discover_repetition_candidates(
     matches_by_text: dict[str, dict[str, list[tuple[int, int]]]] = {}
     for left_index, left in enumerate(views):
         for right in views[left_index + 1 :]:
-            for text, left_start, left_end, right_start, right_end in _pair_maximal_matches(
+            for _raw_text, left_start, left_end, right_start, right_end in _pair_maximal_matches(
                 left, right, MIN_REPETITION_CODE_POINTS
             ):
+                trimmed = _trim_spurious_boundaries(
+                    left,
+                    right,
+                    left_start,
+                    left_end,
+                    right_start,
+                    right_end,
+                    lines_by_id,
+                    MIN_REPETITION_CODE_POINTS,
+                )
+                if trimmed is None:
+                    continue
+                left_start, left_end, right_start, right_end = trimmed
                 if _source_segments_for_range(left, left_start, left_end) is None:
                     continue
                 if _source_segments_for_range(right, right_start, right_end) is None:
                     continue
+                text = left.normalized_text[left_start:left_end]
                 spans_by_block = matches_by_text.setdefault(text, {})
                 for block_id, span in (
                     (left.block_id, (left_start, left_end)),
@@ -2306,16 +2305,11 @@ def discover_repetition_candidates(
                         spans.append(span)
 
     candidates = _drop_contained_candidates(_group_candidate_matches(matches_by_text))
-    occurrences_by_block = {
-        view.block_id: view for view in views
-    }
+    occurrences_by_block = {view.block_id: view for view in views}
     prepared: list[dict[str, Any]] = []
     for candidate in candidates:
         text = candidate["text"]
-        block_ids = sorted(
-            candidate["ranges"],
-            key=lambda block_id: block_rank[block_id],
-        )
+        block_ids = sorted(candidate["ranges"], key=lambda block_id: block_rank[block_id])
         repetition_id = _repetition_id(text, block_ids)
         occurrences: list[dict[str, Any]] = []
         for block_id in block_ids:
@@ -2357,25 +2351,18 @@ def discover_repetition_candidates(
     for candidate in prepared:
         candidate.pop("_anchor", None)
 
-    blocks_payload: list[dict[str, Any]] = []
-    for view in views:
-        blocks_payload.append(
-            {
-                "blockId": view.block_id,
-                "lineIds": list(view.line_ids),
-            }
-        )
+    blocks_payload = [
+        {"blockId": view.block_id, "lineIds": list(view.line_ids)} for view in views
+    ]
     result = {
         "schema": REPETITION_CANDIDATE_SCHEMA_ID,
         "candidateVersion": REPETITION_CANDIDATE_VERSION,
-        "sourceProjectionHash": projection["lrcProjectionHash"],
+        "contentHash": bilingual["contentHash"],
         "minimumCodePoints": MIN_REPETITION_CODE_POINTS,
         "blocks": blocks_payload,
         "candidates": prepared,
     }
-    candidate_issues = _schema_issues(
-        result, "repetition-candidates.schema.json"
-    )
+    candidate_issues = _schema_issues(result, "repetition-candidates.schema.json")
     if candidate_issues:
         raise _error(
             "invalid_repetition_candidates",
@@ -2385,17 +2372,24 @@ def discover_repetition_candidates(
     return result
 
 
-def candidate_groups(candidate_document: dict[str, Any]) -> list[dict[str, Any]]:
+def candidate_groups(
+    candidate_document: dict[str, Any],
+    excluded_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
     candidates = candidate_document.get("candidates")
     if not isinstance(candidates, list):
         return []
+    skip = excluded_ids or set()
     groups: list[dict[str, Any]] = []
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
+        rep_id = candidate.get("repetitionId")
+        if isinstance(rep_id, str) and rep_id in skip:
+            continue
         groups.append(
             {
-                "repetitionId": candidate.get("repetitionId"),
+                "repetitionId": rep_id,
                 "occurrences": candidate.get("occurrences"),
             }
         )
@@ -2404,16 +2398,25 @@ def candidate_groups(candidate_document: dict[str, Any]) -> list[dict[str, Any]]
 
 def validate_repetition_completion(
     document: dict[str, Any],
-    projection: dict[str, Any],
+    bilingual: dict[str, Any],
     *,
     learner_language: str | None = None,
 ) -> tuple[dict[str, Any], list[Issue]]:
     candidates = discover_repetition_candidates(
         document,
-        projection,
+        bilingual,
         learner_language=learner_language,
     )
-    expected = candidate_groups(candidates)
+    all_candidate_ids = {
+        c["repetitionId"]
+        for c in candidates.get("candidates", [])
+        if isinstance(c, dict) and isinstance(c.get("repetitionId"), str)
+    }
+    excluded_ids, exclusion_issues = _extract_excluded_repetitions(document, all_candidate_ids)
+    if exclusion_issues:
+        return candidates, exclusion_issues
+
+    expected = candidate_groups(candidates, excluded_ids=excluded_ids)
     actual = document.get("repetitionGroups")
     if _json_equal(expected, actual):
         return candidates, []
@@ -2487,9 +2490,7 @@ def read_candidate_hash(path: Path) -> str:
     except UnicodeDecodeError as exc:
         raise _error("invalid_utf8", "$", f"Candidate hash is not valid UTF-8: {path}") from exc
     except OSError as exc:
-        raise _error(
-            "file_read_failed", "$", f"Could not read candidate hash: {path}"
-        ) from exc
+        raise _error("file_read_failed", "$", f"Could not read candidate hash: {path}") from exc
     value = text.rstrip("\r\n")
     if HASH_PATTERN.fullmatch(value) is None or text not in {value, value + "\n", value + "\r\n"}:
         raise _error(
@@ -2520,21 +2521,33 @@ def write_validation_report(path: Path, report: dict[str, Any]) -> None:
 
 
 def prepare_semantic_candidate(
-    lrc_path: Path,
-    projection_path: Path,
     workdir: Path,
-    draft_path: Path,
+    draft_path: Path | None = None,
     *,
     learner_language: str,
+    frozen_bilingual_path: Path | None = None,
+    manifest_path: Path | None = None,
     report_path: Path | None = None,
     candidate_path: Path | None = None,
     candidate_hash_path: Path | None = None,
     repetition_candidates_path: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Validate a draft, freeze its normalized candidate, and write its hash."""
+    """Validate a v3 draft against frozen bilingual lyrics, freeze candidate and hash."""
 
     workdir = workdir.expanduser().resolve()
-    draft_path = ensure_inside_workdir(draft_path, workdir, "semantic draft")
+    draft_path = ensure_inside_workdir(
+        draft_path or (workdir / "semantic-draft.json"), workdir, "semantic draft"
+    )
+    frozen_path = ensure_inside_workdir(
+        frozen_bilingual_path or (workdir / "bilingual-lyrics.frozen.json"),
+        workdir,
+        "frozen bilingual lyrics",
+    )
+    manifest_path = ensure_inside_workdir(
+        manifest_path or (workdir / "translation-manifest.json"),
+        workdir,
+        "translation manifest",
+    )
     candidate_path = ensure_inside_workdir(
         candidate_path or (workdir / "analysis-candidate.json"),
         workdir,
@@ -2555,18 +2568,10 @@ def prepare_semantic_candidate(
         workdir,
         "validation report",
     )
-    translated = workdir / "translated.lrc"
-    manifest_path = ensure_inside_workdir(
-        workdir / "translation-manifest.json",
-        workdir,
-        "translation manifest",
-    )
     assert_distinct_paths(
-        ("source LRC", lrc_path),
-        ("source projection", projection_path),
-        ("semantic draft", draft_path),
-        ("frozen translation", translated),
+        ("frozen bilingual lyrics", frozen_path),
         ("translation manifest", manifest_path),
+        ("semantic draft", draft_path),
         ("analysis candidate", candidate_path),
         ("candidate hash", candidate_hash_path),
         ("repetition candidates", repetition_candidates_path),
@@ -2574,44 +2579,27 @@ def prepare_semantic_candidate(
     )
 
     try:
-        projection = load_projection(projection_path)
-        source_lrc = ensure_local_lrc(lrc_path)
-        _, source_issues = verify_source_matches_projection(projection, source_lrc)
-        if source_issues:
-            report = _report(source_issues, stage="prepare")
-            write_validation_report(report_path, report)
-            raise _error(
-                source_issues[0].code,
-                source_issues[0].path,
-                source_issues[0].message,
-            )
-
-        if not translated.is_file():
-            raise _error("file_not_found", "$", f"Frozen translation not found: {translated}")
+        if not manifest_path.is_file():
+            raise _error("file_not_found", "$", f"Translation manifest not found: {manifest_path}")
         manifest = read_json(manifest_path)
-        _, freeze_issues = verify_frozen_translation(projection, translated, manifest)
-        if freeze_issues:
+        _, bilingual, freeze_issues = verify_frozen_bilingual(frozen_path, manifest)
+        if freeze_issues or bilingual is None:
             report = _report(freeze_issues, stage="prepare")
             write_validation_report(report_path, report)
-            raise _error(
-                freeze_issues[0].code,
-                freeze_issues[0].path,
-                freeze_issues[0].message,
-            )
+            first = freeze_issues[0]
+            raise _error(first.code, first.path, first.message)
 
         draft = read_json(draft_path)
-        candidate_projection = {**projection, "lrcFile": source_lrc.name}
-        issues = validate_grammar_analysis_v2(
+        issues = validate_grammar_analysis_v3(
             draft,
-            projection=candidate_projection,
-            expected_lrc_file=source_lrc.name,
-            require_projection=True,
+            bilingual=bilingual,
+            require_bilingual=True,
             learner_language=learner_language,
         )
         if not issues:
             candidates, completion_issues = validate_repetition_completion(
                 draft,
-                projection,
+                bilingual,
                 learner_language=learner_language,
             )
             issues.extend(completion_issues)
@@ -2622,12 +2610,11 @@ def prepare_semantic_candidate(
             write_validation_report(report_path, report)
             raise _error(issues[0].code, issues[0].path, issues[0].message)
 
-        normalized = normalized_analysis_candidate(draft, candidate_projection)
-        normalized_issues = validate_grammar_analysis_v2(
+        normalized = normalized_analysis_candidate(draft, bilingual)
+        normalized_issues = validate_grammar_analysis_v3(
             normalized,
-            projection=candidate_projection,
-            expected_lrc_file=source_lrc.name,
-            require_projection=True,
+            bilingual=bilingual,
+            require_bilingual=True,
             learner_language=learner_language,
         )
         if normalized_issues:
@@ -2646,7 +2633,7 @@ def prepare_semantic_candidate(
         report = _report(
             [],
             stage="prepare",
-            projectionHash=projection["lrcProjectionHash"],
+            contentHash=bilingual["contentHash"],
             candidateHash=candidate_hash,
             candidate=str(candidate_path.name),
         )
@@ -2672,7 +2659,7 @@ def load_frozen_candidate(
     candidate_hash_path: Path,
 ) -> tuple[dict[str, Any], str]:
     candidate, candidate_bytes = _read_json_and_bytes(candidate_path)
-    ensure_v2_document(candidate)
+    ensure_v3_document(candidate)
     canonical_bytes = pretty_json(candidate).encode("utf-8")
     if candidate_bytes != canonical_bytes:
         raise _error(
@@ -2703,9 +2690,7 @@ def _read_json_and_bytes(path: Path) -> tuple[Any, bytes]:
     except FileNotFoundError as exc:
         raise _error("file_not_found", "$", f"File not found: {path}") from exc
     except OSError as exc:
-        raise _error(
-            "file_read_failed", "$", f"Could not read JSON file: {path}"
-        ) from exc
+        raise _error("file_read_failed", "$", f"Could not read JSON file: {path}") from exc
     return parse_json_bytes(data, path.name), data
 
 
@@ -2714,6 +2699,8 @@ def validate_semantic_audit(
     candidate: dict[str, Any],
     candidate_hash: str,
     learner_language: str,
+    *,
+    allow_fail: bool = False,
 ) -> list[Issue]:
     if not isinstance(report, dict):
         return [Issue("invalid_semantic_audit", "$", "Audit report must be an object.")]
@@ -2831,7 +2818,7 @@ def validate_semantic_audit(
                 "A fail audit must contain at least one error finding.",
             )
         )
-    if report.get("status") != "pass":
+    if report.get("status") != "pass" and not (allow_fail and report.get("status") == "fail"):
         issues.append(
             Issue(
                 "semantic_audit_failed",
@@ -2842,8 +2829,8 @@ def validate_semantic_audit(
     return issues
 
 
-def build_isolation_proof_v2(
-    projection: dict[str, Any],
+def build_isolation_proof_v3(
+    bilingual: dict[str, Any],
     stage: str,
     artifact_path: Path,
     method: str,
@@ -2910,12 +2897,12 @@ def build_isolation_proof_v2(
         "transcriptIsolated": True,
         "childTranscriptId": child_transcript_id,
         "parentTranscriptId": parent_transcript_id,
-        "sourceProjectionHash": projection["lrcProjectionHash"],
+        "contentHash": bilingual["contentHash"],
         "artifactSha256": sha256_file(artifact),
     }
-    issues = validate_isolation_proof_v2(
+    issues = validate_isolation_proof_v3(
         proof,
-        projection,
+        bilingual,
         stage=stage,
         artifact_path=artifact,
     )
@@ -2924,9 +2911,9 @@ def build_isolation_proof_v2(
     return proof
 
 
-def validate_isolation_proof_v2(
+def validate_isolation_proof_v3(
     proof: Any,
-    projection: dict[str, Any],
+    bilingual: dict[str, Any],
     *,
     stage: str,
     artifact_path: Path,
@@ -2944,7 +2931,7 @@ def validate_isolation_proof_v2(
             Issue(
                 "unsupported_isolation_version",
                 "$.isolationVersion",
-                "Isolation proof v1 is no longer supported; record a v2 proof.",
+                f"Isolation proof v{proof.get('isolationVersion')} is no longer supported; record a v3 proof.",
             )
         ]
     issues = _schema_issues(proof, "isolation-proof.schema.json")
@@ -2958,12 +2945,12 @@ def validate_isolation_proof_v2(
                 f"Expected stage {stage}.",
             )
         )
-    if proof.get("sourceProjectionHash") != projection.get("lrcProjectionHash"):
+    if proof.get("contentHash") != bilingual.get("contentHash"):
         issues.append(
             Issue(
-                "stale_projection_hash",
-                "$.sourceProjectionHash",
-                "Isolation proof belongs to a different source projection.",
+                "stale_content_hash",
+                "$.contentHash",
+                "Isolation proof belongs to different source content.",
             )
         )
     child = proof.get("childTranscriptId")
@@ -3062,7 +3049,7 @@ def validate_distinct_children(
 
 def _validate_frozen_chain(
     *,
-    projection: dict[str, Any],
+    bilingual: dict[str, Any],
     workdir: Path,
     draft_path: Path,
     candidate_path: Path,
@@ -3071,15 +3058,10 @@ def _validate_frozen_chain(
     grammar_proof_path: Path,
     audit_proof_path: Path,
     learner_language: str,
-    expected_lrc_file: str,
 ) -> tuple[dict[str, Any], dict[str, Any], str, dict[str, Any]]:
     draft_path = ensure_inside_workdir(draft_path, workdir, "semantic draft")
-    candidate_path = ensure_inside_workdir(
-        candidate_path, workdir, "analysis candidate"
-    )
-    candidate_hash_path = ensure_inside_workdir(
-        candidate_hash_path, workdir, "candidate hash"
-    )
+    candidate_path = ensure_inside_workdir(candidate_path, workdir, "analysis candidate")
+    candidate_hash_path = ensure_inside_workdir(candidate_hash_path, workdir, "candidate hash")
     audit_path = ensure_inside_workdir(audit_path, workdir, "semantic audit")
     grammar_proof_path = ensure_inside_workdir(
         grammar_proof_path, workdir, "grammar isolation proof"
@@ -3089,22 +3071,17 @@ def _validate_frozen_chain(
     )
 
     draft, draft_bytes = _read_json_and_bytes(draft_path)
-    draft_issues = validate_grammar_analysis_v2(
+    draft_issues = validate_grammar_analysis_v3(
         draft,
-        projection=projection,
-        expected_lrc_file=expected_lrc_file,
-        require_projection=True,
+        bilingual=bilingual,
+        require_bilingual=True,
         learner_language=learner_language,
     )
     if draft_issues:
-        raise _error(
-            draft_issues[0].code,
-            draft_issues[0].path,
-            draft_issues[0].message,
-        )
+        raise _error(draft_issues[0].code, draft_issues[0].path, draft_issues[0].message)
     _, completion_issues = validate_repetition_completion(
         draft,
-        projection,
+        bilingual,
         learner_language=learner_language,
     )
     if completion_issues:
@@ -3114,7 +3091,7 @@ def _validate_frozen_chain(
             completion_issues[0].message,
         )
 
-    rebuilt = normalized_analysis_candidate(draft, projection)
+    rebuilt = normalized_analysis_candidate(draft, bilingual)
     frozen_candidate, candidate_hash = load_frozen_candidate(
         candidate_path, candidate_hash_path
     )
@@ -3124,11 +3101,10 @@ def _validate_frozen_chain(
             "$",
             "analysis-candidate.json no longer matches a fresh normalization of semantic-draft.json.",
         )
-    candidate_issues = validate_grammar_analysis_v2(
+    candidate_issues = validate_grammar_analysis_v3(
         frozen_candidate,
-        projection=projection,
-        expected_lrc_file=expected_lrc_file,
-        require_projection=True,
+        bilingual=bilingual,
+        require_bilingual=True,
         learner_language=learner_language,
     )
     if candidate_issues:
@@ -3143,17 +3119,13 @@ def _validate_frozen_chain(
         audit, frozen_candidate, candidate_hash, learner_language
     )
     if audit_issues:
-        raise _error(
-            audit_issues[0].code,
-            audit_issues[0].path,
-            audit_issues[0].message,
-        )
+        raise _error(audit_issues[0].code, audit_issues[0].path, audit_issues[0].message)
 
     grammar_proof = read_json(grammar_proof_path)
     audit_proof = read_json(audit_proof_path)
-    grammar_issues = validate_isolation_proof_v2(
+    grammar_issues = validate_isolation_proof_v3(
         grammar_proof,
-        projection,
+        bilingual,
         stage="grammar-analysis",
         artifact_path=draft_path,
     )
@@ -3163,9 +3135,9 @@ def _validate_frozen_chain(
             grammar_issues[0].path,
             grammar_issues[0].message,
         )
-    audit_proof_issues = validate_isolation_proof_v2(
+    audit_proof_issues = validate_isolation_proof_v3(
         audit_proof,
-        projection,
+        bilingual,
         stage="semantic-audit",
         artifact_path=audit_path,
     )
@@ -3177,11 +3149,7 @@ def _validate_frozen_chain(
         )
     child_issues = validate_distinct_children(grammar_proof, audit_proof)
     if child_issues:
-        raise _error(
-            child_issues[0].code,
-            child_issues[0].path,
-            child_issues[0].message,
-        )
+        raise _error(child_issues[0].code, child_issues[0].path, child_issues[0].message)
     if grammar_proof.get("artifactSha256") != sha256_bytes(draft_bytes):
         raise _error(
             "artifact_hash_mismatch",
@@ -3197,12 +3165,13 @@ def _validate_frozen_chain(
     return frozen_candidate, draft, candidate_hash, audit
 
 
-def finalize_sidecar_v2(
-    lrc_path: Path,
-    projection_path: Path,
+def finalize_sidecar_v3(
+    output_path: Path,
     workdir: Path,
     *,
     learner_language: str,
+    frozen_bilingual_path: Path | None = None,
+    manifest_path: Path | None = None,
     draft_path: Path | None = None,
     candidate_path: Path | None = None,
     candidate_hash_path: Path | None = None,
@@ -3224,27 +3193,29 @@ def finalize_sidecar_v2(
         workdir,
         "finalize report",
     )
-    translated = workdir / "translated.lrc"
+    frozen_path = ensure_inside_workdir(
+        frozen_bilingual_path or (workdir / "bilingual-lyrics.frozen.json"),
+        workdir,
+        "frozen bilingual lyrics",
+    )
     manifest_path = ensure_inside_workdir(
-        workdir / "translation-manifest.json",
+        manifest_path or (workdir / "translation-manifest.json"),
         workdir,
         "translation manifest",
     )
-    source_lrc = ensure_local_lrc(lrc_path)
-    output = source_lrc.with_suffix(".json")
-    if output.is_symlink():
+    raw_output = output_path.expanduser()
+    if raw_output.is_symlink():
         raise _error(
             "unsupported_source",
             "$",
             "The production sidecar path must not be a symlink.",
         )
+    output = raw_output.resolve()
     assert_distinct_paths(
-        ("source LRC", source_lrc),
         ("production sidecar", output),
-        ("source projection", projection_path),
-        ("semantic draft", draft_path),
-        ("frozen translation", translated),
+        ("frozen bilingual lyrics", frozen_path),
         ("translation manifest", manifest_path),
+        ("semantic draft", draft_path),
         ("analysis candidate", candidate_path),
         ("candidate hash", candidate_hash_path),
         ("semantic audit", audit_path),
@@ -3254,31 +3225,16 @@ def finalize_sidecar_v2(
     )
 
     try:
-        projection = load_projection(projection_path)
-        _, source_issues = verify_source_matches_projection(projection, source_lrc)
-        if source_issues:
-            write_validation_report(
-                report_path, _report(source_issues, stage="finalize")
-            )
-            raise _error(
-                source_issues[0].code,
-                source_issues[0].path,
-                source_issues[0].message,
-            )
+        if not manifest_path.is_file():
+            raise _error("file_not_found", "$", f"Translation manifest not found: {manifest_path}")
         manifest = read_json(manifest_path)
-        _, freeze_issues = verify_frozen_translation(projection, translated, manifest)
-        if freeze_issues:
-            write_validation_report(
-                report_path, _report(freeze_issues, stage="finalize")
-            )
-            raise _error(
-                freeze_issues[0].code,
-                freeze_issues[0].path,
-                freeze_issues[0].message,
-            )
+        _, bilingual, freeze_issues = verify_frozen_bilingual(frozen_path, manifest)
+        if freeze_issues or bilingual is None:
+            write_validation_report(report_path, _report(freeze_issues, stage="finalize"))
+            raise _error(freeze_issues[0].code, freeze_issues[0].path, freeze_issues[0].message)
 
         candidate, _draft, candidate_hash, _audit = _validate_frozen_chain(
-            projection=projection,
+            bilingual=bilingual,
             workdir=workdir,
             draft_path=draft_path,
             candidate_path=candidate_path,
@@ -3287,18 +3243,17 @@ def finalize_sidecar_v2(
             grammar_proof_path=grammar_proof_path,
             audit_proof_path=audit_proof_path,
             learner_language=learner_language,
-            expected_lrc_file=source_lrc.name,
         )
         if output.exists() and not replace:
             try:
                 existing = read_json(output)
             except SidecarError:
                 existing = None
-            if isinstance(existing, dict) and existing.get("schemaVersion") == 1:
+            if isinstance(existing, dict) and existing.get("schemaVersion") != SCHEMA_VERSION:
                 raise _error(
                     "unsupported_schema_version",
                     "$.schemaVersion",
-                    "Existing production sidecar is Schema v1; pass --replace to regenerate Schema v2.",
+                    f"Existing production sidecar uses schemaVersion={existing.get('schemaVersion')!r}; pass --replace to overwrite with Schema v3.",
                 )
         changed = write_json_atomic(output, candidate, replace=replace)
         if sha256_file(output) != candidate_hash:
@@ -3310,7 +3265,7 @@ def finalize_sidecar_v2(
         report = _report(
             [],
             stage="finalize",
-            projectionHash=projection["lrcProjectionHash"],
+            contentHash=bilingual["contentHash"],
             candidateHash=candidate_hash,
             output=output.name,
         )
@@ -3331,12 +3286,13 @@ def finalize_sidecar_v2(
         raise _error(issue.code, issue.path, issue.message) from exc
 
 
-def validate_finalized_sidecar_v2(
-    lrc_path: Path,
+def validate_finalized_sidecar_v3(
     sidecar_path: Path,
-    projection_path: Path,
     workdir: Path,
     learner_language: str,
+    *,
+    frozen_bilingual_path: Path | None = None,
+    manifest_path: Path | None = None,
 ) -> list[Issue]:
     workdir = workdir.expanduser().resolve()
     sidecar_path = sidecar_path.expanduser()
@@ -3348,31 +3304,31 @@ def validate_finalized_sidecar_v2(
                 "The production sidecar must not be a symlink.",
             )
         ]
-    projection = load_projection(projection_path)
-    source_lrc = ensure_local_lrc(lrc_path)
-    _, source_issues = verify_source_matches_projection(projection, source_lrc)
-    translated = workdir / "translated.lrc"
+    frozen_path = ensure_inside_workdir(
+        frozen_bilingual_path or (workdir / "bilingual-lyrics.frozen.json"),
+        workdir,
+        "frozen bilingual lyrics",
+    )
     manifest_path = ensure_inside_workdir(
-        workdir / "translation-manifest.json",
+        manifest_path or (workdir / "translation-manifest.json"),
         workdir,
         "translation manifest",
     )
     manifest = read_json(manifest_path)
-    _, freeze_issues = verify_frozen_translation(projection, translated, manifest)
+    _, bilingual, freeze_issues = verify_frozen_bilingual(frozen_path, manifest)
     document, document_bytes = _read_json_and_bytes(sidecar_path)
-    document_issues = validate_grammar_analysis_v2(
+    document_issues = validate_grammar_analysis_v3(
         document,
-        projection=projection,
-        expected_lrc_file=source_lrc.name,
-        require_projection=True,
+        bilingual=bilingual,
+        require_bilingual=True,
         learner_language=learner_language,
     )
-    issues = [*source_issues, *freeze_issues, *document_issues]
-    if issues:
+    issues = [*freeze_issues, *document_issues]
+    if issues or bilingual is None:
         return issues
     try:
         candidate, _draft, candidate_hash, _audit = _validate_frozen_chain(
-            projection=projection,
+            bilingual=bilingual,
             workdir=workdir,
             draft_path=workdir / "semantic-draft.json",
             candidate_path=workdir / "analysis-candidate.json",
@@ -3381,7 +3337,6 @@ def validate_finalized_sidecar_v2(
             grammar_proof_path=workdir / "isolation-grammar-analysis.json",
             audit_proof_path=workdir / "isolation-semantic-audit.json",
             learner_language=learner_language,
-            expected_lrc_file=source_lrc.name,
         )
     except SidecarError as exc:
         return [Issue(exc.code, exc.path, exc.message)]

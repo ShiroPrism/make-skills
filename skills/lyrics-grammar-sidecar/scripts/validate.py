@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline Schema v2, occurrence, meaning, and reference validation."""
+"""Offline Schema v3, occurrence, meaning, and reference validation."""
 
 from __future__ import annotations
 
@@ -9,30 +9,27 @@ import sys
 from pathlib import Path
 
 from sidecarlib import (
+    SCHEMA_VERSION,
     SidecarError,
     assert_distinct_paths,
     configure_utf8_stdio,
-    load_projection,
+    load_bilingual_lyrics,
     read_json,
     write_json_atomic,
 )
-from v2lib import validate_grammar_analysis_v2
+from v3lib import validate_grammar_analysis_v3
 
 
 def main() -> int:
     configure_utf8_stdio()
     parser = argparse.ArgumentParser(
-        description="Validate a Schema v2 lyrics grammar sidecar without SakuraUta."
+        description="Validate a Schema v3 lyrics grammar sidecar or semantic draft."
     )
-    parser.add_argument("sidecar", type=Path, help="Sidecar JSON")
+    parser.add_argument("sidecar", type=Path, help="Sidecar or draft JSON")
     parser.add_argument(
-        "--projection",
+        "--bilingual",
         type=Path,
-        help="Frozen source-projection.json for exact source and hash checks",
-    )
-    parser.add_argument(
-        "--expected-lrc-name",
-        help="Require source.lrcFile to equal this sibling basename",
+        help="Frozen bilingual-lyrics(.frozen).json for source content parity checks",
     )
     parser.add_argument(
         "--learner-language",
@@ -41,46 +38,33 @@ def main() -> int:
     parser.add_argument("--report", type=Path, help="Write a validation report")
     args = parser.parse_args()
 
-    projection = None
+    bilingual = None
     try:
         raw_sidecar_path = args.sidecar.expanduser()
         if raw_sidecar_path.is_symlink():
-            raise SidecarError(
-                "unsupported_source",
-                "Symlinked sidecars are not supported.",
-            )
+            raise SidecarError("unsupported_source", "Symlinked sidecars are not supported.")
         sidecar_path = raw_sidecar_path.resolve()
-        projection_path = (
-            args.projection.expanduser()
-            if args.projection is not None
-            else None
-        )
+        bilingual_path = args.bilingual.expanduser() if args.bilingual is not None else None
         report_path = args.report.expanduser() if args.report is not None else None
         assert_distinct_paths(
             ("sidecar", sidecar_path),
-            ("source projection", projection_path),
+            ("bilingual lyrics", bilingual_path),
             ("validation report", report_path),
         )
-        if args.projection is not None:
-            assert projection_path is not None
-            projection = load_projection(projection_path)
+        if bilingual_path is not None:
+            bilingual = load_bilingual_lyrics(bilingual_path)
         document = read_json(sidecar_path)
-        issues = validate_grammar_analysis_v2(
+        issues = validate_grammar_analysis_v3(
             document,
-            projection=projection,
-            expected_lrc_file=(
-                args.expected_lrc_name
-                or (projection.get("lrcFile") if projection is not None else None)
-            ),
+            bilingual=bilingual,
+            require_bilingual=bilingual is not None,
             learner_language=args.learner_language,
         )
         report = {
             "ok": not issues,
-            "schemaVersion": 2,
+            "schemaVersion": SCHEMA_VERSION,
             "errors": [issue.as_dict() for issue in issues],
-            "projectionHash": (
-                projection["lrcProjectionHash"] if projection is not None else None
-            ),
+            "contentHash": bilingual["contentHash"] if bilingual is not None else None,
             "sidecar": sidecar_path.name,
         }
         if report_path is not None:

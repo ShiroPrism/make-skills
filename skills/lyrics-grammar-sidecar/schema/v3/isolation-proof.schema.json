@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sakurauta.app/schemas/lyrics-grammar-isolation-proof/v2.json",
-  "title": "SakuraUta Lyrics Grammar Isolation Proof v2",
+  "$id": "https://sakurauta.app/schemas/lyrics-grammar-isolation-proof/v3.json",
+  "title": "Lyrics Grammar Isolation Proof v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,12 +13,12 @@
     "transcriptIsolated",
     "childTranscriptId",
     "parentTranscriptId",
-    "sourceProjectionHash",
+    "contentHash",
     "artifactSha256"
   ],
   "properties": {
     "schema": {"const": "sakurauta.lyrics-grammar-isolation-proof"},
-    "isolationVersion": {"const": 2},
+    "isolationVersion": {"const": 3},
     "stage": {"enum": ["grammar-analysis", "semantic-audit"]},
     "method": {"enum": ["native-subagent", "codex-exec", "documented-harness"]},
     "context": {"const": "non-forked-transcript"},
@@ -33,7 +33,7 @@
       "minLength": 1,
       "maxLength": 240
     },
-    "sourceProjectionHash": {"$ref": "#/$defs/hash"},
+    "contentHash": {"$ref": "#/$defs/hash"},
     "artifactSha256": {"$ref": "#/$defs/hash"}
   },
   "$defs": {

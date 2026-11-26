@@ -1,0 +1,26 @@
+{
+  "contentHash": "sha256:11120b654275793a2acc505c16509865570b433c9c82967b8bdb2c62e07c185a",
+  "learnerLanguage": "zh-CN",
+  "lineCount": 2,
+  "lines": [
+    {
+      "fingerprint": "sha256:0aea28dc71b116623d642947e6c797ae931d818a9a17927b8fdc954b809366fa",
+      "lineId": "l_001",
+      "sourceOrder": 0,
+      "text": "너에게 보내는",
+      "translation": "寄给你的"
+    },
+    {
+      "fingerprint": "sha256:8d829c6689f31042360ce1b63ff77a490ba4bff2fa227d6f6a7053a463287736",
+      "lineId": "l_002",
+      "sourceOrder": 1,
+      "text": "짧은 편지야",
+      "translation": "是一封短短的信"
+    }
+  ],
+  "schema": "sakurauta.bilingual-lyrics",
+  "schemaVersion": 1,
+  "sourceLanguages": [
+    "ko"
+  ]
+}

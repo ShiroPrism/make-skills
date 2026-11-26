@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sakurauta.app/schemas/lyrics-grammar-semantic-audit/v1.json",
-  "title": "SakuraUta Lyrics Grammar Semantic Audit",
+  "title": "Lyrics Grammar Semantic Audit",
   "type": "object",
   "additionalProperties": false,
   "required": [

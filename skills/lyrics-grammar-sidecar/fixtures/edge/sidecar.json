@@ -3,12 +3,11 @@
     {
       "blockId": "b_fixture",
       "confidence": 0.92,
-      "endTimeMs": 30000,
       "labels": [],
       "lineIds": [
-        "l_f6960855204db522",
-        "l_e42cab7a3a0a1d06",
-        "l_382e4bdca7aa352e"
+        "l_001",
+        "l_002",
+        "l_003"
       ],
       "meaning": {
         "parts": [
@@ -16,8 +15,7 @@
             "meaningUnitOccurrenceId": "muo_fixture"
           }
         ]
-      },
-      "startTimeMs": 10000
+      }
     }
   ],
   "extensions": {
@@ -63,29 +61,26 @@
           "start": 2
         }
       ],
-      "lineId": "l_f6960855204db522",
+      "lineId": "l_001",
       "role": "text",
       "sourceOrder": 0,
-      "text": "😀é",
-      "timeMs": 10000
+      "text": "😀é"
     },
     {
       "fingerprint": "sha256:4e42d0b0d8be98b0964228d1da4fce746e2e4b948cb9268ed6788f57ff52faaf",
       "language": "ja",
-      "lineId": "l_e42cab7a3a0a1d06",
+      "lineId": "l_002",
       "role": "text",
       "sourceOrder": 1,
-      "text": "same",
-      "timeMs": 20000
+      "text": "same"
     },
     {
       "fingerprint": "sha256:4e42d0b0d8be98b0964228d1da4fce746e2e4b948cb9268ed6788f57ff52faaf",
       "language": "ja",
-      "lineId": "l_382e4bdca7aa352e",
+      "lineId": "l_003",
       "role": "text",
       "sourceOrder": 2,
-      "text": "same",
-      "timeMs": 30000
+      "text": "same"
     }
   ],
   "meaningUnits": [
@@ -100,19 +95,19 @@
           "sourceSegments": [
             {
               "end": 3,
-              "lineId": "l_f6960855204db522",
+              "lineId": "l_001",
               "start": 0,
               "text": "😀é"
             },
             {
               "end": 4,
-              "lineId": "l_e42cab7a3a0a1d06",
+              "lineId": "l_002",
               "start": 0,
               "text": "same"
             },
             {
               "end": 4,
-              "lineId": "l_382e4bdca7aa352e",
+              "lineId": "l_003",
               "start": 0,
               "text": "same"
             }
@@ -141,19 +136,19 @@
           "sourceSegments": [
             {
               "end": 3,
-              "lineId": "l_f6960855204db522",
+              "lineId": "l_001",
               "start": 0,
               "text": "😀é"
             },
             {
               "end": 4,
-              "lineId": "l_e42cab7a3a0a1d06",
+              "lineId": "l_002",
               "start": 0,
               "text": "same"
             },
             {
               "end": 4,
-              "lineId": "l_382e4bdca7aa352e",
+              "lineId": "l_003",
               "start": 0,
               "text": "same"
             }
@@ -168,15 +163,13 @@
   "relations": [],
   "repetitionGroups": [],
   "schema": "sakurauta.lyrics-grammar-analysis",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "source": {
+    "contentHash": "sha256:4265c5e1010f1875c286bca4fd9e6a6343c97d1872bb3ee14a24e0b7690089d6",
     "lineCount": 3,
-    "lrcFile": "source.lrc",
-    "lrcProjectionHash": "sha256:6977e9ba92bf2a2076cb95d16e9414495319ed0b0038bef76ed077bf76e62125",
-    "songId": "Fixture - Unicode Edge",
     "sourceLanguages": [
-      "ja",
-      "en"
+      "en",
+      "ja"
     ]
   },
   "uncertainties": []

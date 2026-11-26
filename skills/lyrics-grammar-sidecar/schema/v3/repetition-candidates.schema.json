@@ -1,21 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sakurauta.app/schemas/lyrics-grammar-repetition-candidates/v1.json",
-  "title": "SakuraUta Lyrics Grammar Repetition Candidates",
+  "$id": "https://sakurauta.app/schemas/lyrics-grammar-repetition-candidates/v2.json",
+  "title": "Lyrics Grammar Repetition Candidates v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema",
     "candidateVersion",
-    "sourceProjectionHash",
+    "contentHash",
     "minimumCodePoints",
     "blocks",
     "candidates"
   ],
   "properties": {
     "schema": {"const": "sakurauta.lyrics-grammar-repetition-candidates"},
-    "candidateVersion": {"const": 1},
-    "sourceProjectionHash": {"$ref": "#/$defs/hash"},
+    "candidateVersion": {"const": 2},
+    "contentHash": {"$ref": "#/$defs/hash"},
     "minimumCodePoints": {"const": 8},
     "blocks": {
       "type": "array",

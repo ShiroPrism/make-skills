@@ -1,0 +1,40 @@
+{
+  "contentHash": "sha256:109b4f8b52dfaa958923e663c6741b4be8f00cdd88269e669768686676fdcea3",
+  "learnerLanguage": "zh-CN",
+  "lineCount": 4,
+  "lines": [
+    {
+      "fingerprint": "sha256:dae84c24f232203e3b94c5e4003d00aba213e99e502d63f16b2215c116696644",
+      "lineId": "l_001",
+      "sourceOrder": 0,
+      "text": "君がくれた",
+      "translation": "你给我的"
+    },
+    {
+      "fingerprint": "sha256:5d719b27e9a9905177571d504990c78bc7aa7905be0897ebfca4d57f9e213f93",
+      "lineId": "l_002",
+      "sourceOrder": 1,
+      "text": "小さな約束を",
+      "translation": "那个小小的约定"
+    },
+    {
+      "fingerprint": "sha256:4720420b4aee38e7311d7d079bd51846c89537ddf367d0c07c110347901d8473",
+      "lineId": "l_003",
+      "sourceOrder": 2,
+      "text": "今でも覚えている",
+      "translation": "我至今仍记得"
+    },
+    {
+      "fingerprint": "sha256:dae84c24f232203e3b94c5e4003d00aba213e99e502d63f16b2215c116696644",
+      "lineId": "l_004",
+      "sourceOrder": 3,
+      "text": "君がくれた",
+      "translation": "你给我的"
+    }
+  ],
+  "schema": "sakurauta.bilingual-lyrics",
+  "schemaVersion": 1,
+  "sourceLanguages": [
+    "ja"
+  ]
+}

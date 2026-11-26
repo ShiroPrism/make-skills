@@ -1,0 +1,75 @@
+{
+  "contentHash": "sha256:225121414baccd834c6bf998538b13458f9ad99f63bb4d86adb8ecb4456e9c63",
+  "learnerLanguage": "zh-CN",
+  "lineCount": 9,
+  "lines": [
+    {
+      "fingerprint": "sha256:1160992bb93500a18af7096e987ff286da5789802e21555cb9c545c1179860ce",
+      "lineId": "l_001",
+      "sourceOrder": 0,
+      "text": "夜明けの歌を君と歌う",
+      "translation": "与你同唱黎明之歌"
+    },
+    {
+      "fingerprint": "sha256:36890807f2e9094cefee840fbe5d5ac47da20751d999b045900b308b91025234",
+      "lineId": "l_002",
+      "sourceOrder": 1,
+      "text": "同じ約束を胸に抱いて",
+      "translation": "把同一个约定抱在胸前"
+    },
+    {
+      "fingerprint": "sha256:e59bf1641748d7237bc01bbed5261596ac46c9fb3264a451e889c2c0f4b2c314",
+      "lineId": "l_003",
+      "sourceOrder": 2,
+      "text": "この声が届くまで",
+      "translation": "直到这份声音传到你身边"
+    },
+    {
+      "fingerprint": "sha256:1160992bb93500a18af7096e987ff286da5789802e21555cb9c545c1179860ce",
+      "lineId": "l_004",
+      "sourceOrder": 3,
+      "text": "夜明けの歌を君と歌う",
+      "translation": "与你同唱黎明之歌"
+    },
+    {
+      "fingerprint": "sha256:36890807f2e9094cefee840fbe5d5ac47da20751d999b045900b308b91025234",
+      "lineId": "l_005",
+      "sourceOrder": 4,
+      "text": "同じ約束を胸に抱いて",
+      "translation": "把同一个约定抱在胸前"
+    },
+    {
+      "fingerprint": "sha256:902f1c9bfa6494c9aebc1ea6576719e08424c6d7daba383470f07690b3227d50",
+      "lineId": "l_006",
+      "sourceOrder": 5,
+      "text": "この声が届くまでもっと遠くへ",
+      "translation": "直到这份声音传得更远"
+    },
+    {
+      "fingerprint": "sha256:1160992bb93500a18af7096e987ff286da5789802e21555cb9c545c1179860ce",
+      "lineId": "l_007",
+      "sourceOrder": 6,
+      "text": "夜明けの歌を君と歌う",
+      "translation": "与你同唱黎明之歌"
+    },
+    {
+      "fingerprint": "sha256:36890807f2e9094cefee840fbe5d5ac47da20751d999b045900b308b91025234",
+      "lineId": "l_008",
+      "sourceOrder": 7,
+      "text": "同じ約束を胸に抱いて",
+      "translation": "把同一个约定抱在胸前"
+    },
+    {
+      "fingerprint": "sha256:3263f63806dcf3499b4d4b8bd768fd346754d887659c34efb78f300fe04990eb",
+      "lineId": "l_009",
+      "sourceOrder": 8,
+      "text": "新しい朝を迎えに行こう",
+      "translation": "去迎接崭新的清晨"
+    }
+  ],
+  "schema": "sakurauta.bilingual-lyrics",
+  "schemaVersion": 1,
+  "sourceLanguages": [
+    "ja"
+  ]
+}

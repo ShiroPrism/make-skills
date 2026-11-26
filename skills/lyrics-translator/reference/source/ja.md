@@ -18,6 +18,7 @@ Make one semantic block when consecutive lines contain any of these:
 ## Common Traps
 
 - Do not invent an English-like explicit subject unless the block resolves it.
+- Do not inject plural `"我们"` for Japanese volitional `〜おう / 〜よう` (e.g., `遊ぼう`, `しよう`, `踊ろう`) when the song's narrative perspective is singular `"我"` speaking to `"你"` (`君`); render as a direct intimate invitation (`……吧`) unless context clearly establishes a plural `"we"`.
 - Do not read kanji by its Chinese meaning; consult the pair exception for Chinese targets.
 - Preserve the speaker’s intimacy, distance, and gender-neutrality unless context establishes otherwise.
 
